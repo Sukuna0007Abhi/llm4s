@@ -38,6 +38,9 @@ object Versions {
 
   // AWS SDK
   val awsSdk     = "2.29.51"
+
+  // Prometheus
+  val prometheus = "0.16.0"
 }
 
 object Deps {
@@ -77,6 +80,10 @@ object Deps {
   // AWS SDK
   val awsS3      = "software.amazon.awssdk" % "s3"  % Versions.awsSdk
   val awsSts     = "software.amazon.awssdk" % "sts" % Versions.awsSdk
+
+  // Prometheus metrics
+  val prometheusSimple = "io.prometheus" % "simpleclient" % Versions.prometheus
+  val prometheusHttp   = "io.prometheus" % "simpleclient_httpserver" % Versions.prometheus
 }
 
 object Common {
