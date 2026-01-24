@@ -36,9 +36,12 @@ class AnthropicClient(config: AnthropicConfig) extends LLMClient {
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] =
+  ): Result[Completion] = {
+    val startTime = System.currentTimeMillis()
+    val metrics   = org.llm4s.metrics.PrometheusMetrics.default
+
     // Transform options and messages for model-specific constraints
-    TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
+    val result = TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
       transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
 
@@ -84,6 +87,22 @@ class AnthropicClient(config: AnthropicConfig) extends LLMClient {
         }
         attempt.map(convertFromAnthropicResponse) // Convert response to our model
     }
+
+    // Record metrics
+    result match {
+      case Right(completion) =>
+        val durationMs = System.currentTimeMillis() - startTime
+        metrics.recordSuccess("anthropic", config.model, durationMs)
+        completion.usage.foreach { usage =>
+          metrics.recordTokens(usage.promptTokens, usage.completionTokens, "anthropic", config.model)
+        }
+      case Left(error) =>
+        val durationMs = System.currentTimeMillis() - startTime
+        metrics.recordError("anthropic", config.model, error.getClass.getSimpleName, Some(durationMs))
+    }
+
+    result
+  }
 
   /*
 curl https://api.anthropic.com/v1/messages \

@@ -20,8 +20,27 @@ class OllamaClient(config: OllamaConfig) extends LLMClient {
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] =
-    connect(conversation, options)
+  ): Result[Completion] = {
+    val startTime = System.currentTimeMillis()
+    val metrics   = org.llm4s.metrics.PrometheusMetrics.default
+
+    val result = connect(conversation, options)
+
+    // Record metrics
+    result match {
+      case Right(completion) =>
+        val durationMs = System.currentTimeMillis() - startTime
+        metrics.recordSuccess("ollama", config.model, durationMs)
+        completion.usage.foreach { usage =>
+          metrics.recordTokens(usage.promptTokens, usage.completionTokens, "ollama", config.model)
+        }
+      case Left(error) =>
+        val durationMs = System.currentTimeMillis() - startTime
+        metrics.recordError("ollama", config.model, error.getClass.getSimpleName, Some(durationMs))
+    }
+
+    result
+  }
 
   private def connect(conversation: Conversation, options: CompletionOptions) = {
     val requestBody = createRequestBody(conversation, options, stream = false)

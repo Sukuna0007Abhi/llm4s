@@ -83,8 +83,11 @@ class OpenAIClient private (
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] =
-    validateNotClosed.flatMap { _ =>
+  ): Result[Completion] = {
+    val startTime = System.currentTimeMillis()
+    val metrics   = org.llm4s.metrics.PrometheusMetrics.default
+
+    val result = validateNotClosed.flatMap { _ =>
       // Transform options and messages for model-specific constraints
       for {
         transformed <- TransformationResult.transform(
@@ -106,6 +109,22 @@ class OpenAIClient private (
           }
       } yield convertFromOpenAIFormat(completions)
     }
+
+    // Record metrics
+    result match {
+      case Right(completion) =>
+        val durationMs = System.currentTimeMillis() - startTime
+        metrics.recordSuccess("openai", model, durationMs)
+        completion.usage.foreach { usage =>
+          metrics.recordTokens(usage.promptTokens, usage.completionTokens, "openai", model)
+        }
+      case Left(error) =>
+        val durationMs = System.currentTimeMillis() - startTime
+        metrics.recordError("openai", model, error.getClass.getSimpleName, Some(durationMs))
+    }
+
+    result
+  }
 
   override def streamComplete(
     conversation: Conversation,
