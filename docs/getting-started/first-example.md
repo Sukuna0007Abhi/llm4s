@@ -419,6 +419,195 @@ for {
 
 ---
 
+## Performance Optimization
+
+### 1. Reuse Client Instances
+
+Don't create a new client for every request:
+
+```scala
+// ✅ Good: Create once, reuse
+val clientResult = for {
+  providerConfig <- Llm4sConfig.provider()
+  client <- LLMConnect.getClient(providerConfig)
+} yield client
+
+clientResult match {
+  case Right(client) =>
+    // Reuse for multiple requests
+    (1 to 10).foreach { i =>
+      client.complete(List(UserMessage(s"Question $i")), None)
+    }
+  case Left(error) => println(s"Error: $error")
+}
+
+// ❌ Bad: Creating new client each time (wasteful)
+(1 to 10).foreach { i =>
+  for {
+    providerConfig <- Llm4sConfig.provider()
+    client <- LLMConnect.getClient(providerConfig)  // Don't do this!
+    response <- client.complete(List(UserMessage(s"Q$i")), None)
+  } yield response
+}
+```
+
+### 2. Use Streaming for Long Responses
+
+Streaming gets you the first token faster and improves perceived latency:
+
+```scala
+import org.llm4s.llmconnect.model.{CompletionRequest, UserMessage}
+
+val streamResult = for {
+  providerConfig <- Llm4sConfig.provider()
+  client <- LLMConnect.getClient(providerConfig)
+  stream <- client.completeStreaming(
+    List(UserMessage("Write a long essay about Scala")),
+    None
+  )
+} yield stream
+
+streamResult match {
+  case Right(stream) =>
+    stream.foreach { chunk =>
+      print(chunk.content)  // Prints as tokens arrive
+    }
+  case Left(error) => println(s"Error: $error")
+}
+```
+
+**When to stream:**
+- User-facing applications (chat interfaces)
+- Long-form content generation
+- When you need to show progress
+
+**When not to stream:**
+- Short queries (< 100 tokens)
+- When you need the full response before processing
+- Background batch jobs
+
+### 3. Parallelize Independent Requests
+
+Process multiple unrelated queries concurrently:
+
+```scala
+import scala.concurrent.{Future, ExecutionContext, Await}
+import scala.concurrent.duration._
+import ExecutionContext.Implicits.global
+
+val clientResult = for {
+  providerConfig <- Llm4sConfig.provider()
+  client <- LLMConnect.getClient(providerConfig)
+} yield client
+
+clientResult match {
+  case Right(client) =>
+    val queries = List(
+      "What is Scala?",
+      "What is functional programming?",
+      "What is the JVM?"
+    )
+
+    // Run all queries in parallel
+    val futures = queries.map { query =>
+      Future {
+        client.complete(List(UserMessage(query)), None)
+      }
+    }
+
+    val results = Await.result(Future.sequence(futures), 30.seconds)
+    results.foreach {
+      case Right(response) => println(response.content)
+      case Left(error) => println(s"Error: $error")
+    }
+
+  case Left(error) => println(s"Error: $error")
+}
+```
+
+### 4. Set Appropriate Timeouts
+
+Different operations need different timeouts:
+
+```hocon
+# In application.conf
+llm4s {
+  # Short timeout for quick queries
+  request-timeout = 15 seconds
+
+  # For long-form generation
+  # request-timeout = 60 seconds
+}
+```
+
+Or override per request:
+
+```scala
+import scala.concurrent.duration._
+
+// This is conceptual - actual API may vary
+val response = client.complete(
+  messages = List(UserMessage("Quick question")),
+  model = None,
+  timeout = Some(10.seconds)
+)
+```
+
+### 5. Use Cheaper Models for Development
+
+```bash
+# Development: Fast and cheap
+export LLM_MODEL=openai/gpt-4o-mini  # 60x cheaper than gpt-4
+
+# Or free with Ollama
+export LLM_MODEL=ollama/llama3.2
+
+# Production: Use when quality matters
+export LLM_MODEL=openai/gpt-4o
+```
+
+### 6. Batch Embeddings
+
+When generating embeddings for RAG:
+
+```scala
+// ✅ Good: Batch processing
+val documents = List("doc1", "doc2", ... "doc1000")
+val batchSize = 100
+
+val allEmbeddings = documents.grouped(batchSize).flatMap { batch =>
+  embedder.embed(batch) match {
+    case Right(embeddings) => embeddings
+    case Left(error) =>
+      println(s"Batch failed: $error")
+      List.empty
+  }
+}.toList
+
+// ❌ Bad: One at a time (slow, expensive)
+val embeddings = documents.map { doc =>
+  embedder.embed(List(doc))
+}
+```
+
+### 7. Monitor Token Usage
+
+Track costs in production:
+
+```scala
+val response = client.complete(messages, None)
+
+response match {
+  case Right(completion) =>
+    println(s"Prompt tokens: ${completion.usage.map(_.promptTokens)}")
+    println(s"Completion tokens: ${completion.usage.map(_.completionTokens)}")
+    println(s"Total tokens: ${completion.usage.map(_.totalTokens)}")
+  case Left(error) => println(s"Error: $error")
+}
+```
+
+---
+
 ## Next Steps
 
 Great job! You've written your first LLM4S programs. Now explore:
