@@ -2,7 +2,7 @@
 layout: page
 title: Testing Guide
 parent: Getting Started
-nav_order: 6
+nav_order: 5
 ---
 
 # Testing LLM4S Applications
@@ -37,8 +37,10 @@ For pure logic tests, mock the LLM client:
 ### Basic Mock
 
 ```scala
-import org.llm4s.llmconnect.{LLMClient, CompletionResponse, CompletionRequest}
-import org.llm4s.llmconnect.model.{Message, Usage}
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.model._
+import org.llm4s.types.Result
+import org.llm4s.error.NetworkError
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -46,20 +48,36 @@ class WeatherAgentSpec extends AnyFlatSpec with Matchers {
 
   // Mock client that returns canned responses
   class MockLLMClient extends LLMClient {
-    override def complete(request: CompletionRequest): Result[CompletionResponse] = {
-      Right(CompletionResponse(
+    override def complete(
+      conversation: Conversation,
+      options: CompletionOptions = CompletionOptions()
+    ): Result[Completion] = {
+      Right(Completion(
+        id = "mock-1",
+        created = System.currentTimeMillis(),
         content = "The weather in London is 15°C and cloudy.",
-        finishReason = Some("stop"),
-        usage = Some(Usage(promptTokens = 10, completionTokens = 15, totalTokens = 25)),
         model = "mock-model",
-        role = "assistant"
+        message = AssistantMessage("The weather in London is 15°C and cloudy."),
+        usage = Some(TokenUsage(promptTokens = 10, completionTokens = 15, totalTokens = 25))
       ))
     }
 
-    override def completeStreaming(request: CompletionRequest): Result[Iterator[CompletionResponse]] = {
-      Right(Iterator(
-        CompletionResponse(content = "The weather", finishReason = None, model = "mock"),
-        CompletionResponse(content = " is sunny", finishReason = Some("stop"), model = "mock")
+    override def streamComplete(
+      conversation: Conversation,
+      options: CompletionOptions = CompletionOptions(),
+      onChunk: StreamedChunk => Unit
+    ): Result[Completion] = {
+      val chunks = List(
+        StreamedChunk(content = Some("The weather"), finishReason = None),
+        StreamedChunk(content = Some(" is sunny"), finishReason = Some("stop"))
+      )
+      chunks.foreach(onChunk)
+      Right(Completion(
+        id = "mock-1",
+        created = System.currentTimeMillis(),
+        content = "The weather is sunny",
+        model = "mock-model",
+        message = AssistantMessage("The weather is sunny")
       ))
     }
   }
@@ -79,11 +97,18 @@ class WeatherAgentSpec extends AnyFlatSpec with Matchers {
 
   it should "handle errors gracefully" in {
     class FailingMockClient extends LLMClient {
-      override def complete(request: CompletionRequest): Result[CompletionResponse] = {
-        Left(LLMError.NetworkError("Connection timeout"))
+      override def complete(
+        conversation: Conversation,
+        options: CompletionOptions = CompletionOptions()
+      ): Result[Completion] = {
+        Left(NetworkError("Connection timeout"))
       }
-      override def completeStreaming(request: CompletionRequest): Result[Iterator[CompletionResponse]] = {
-        Left(LLMError.NetworkError("Connection timeout"))
+      override def streamComplete(
+        conversation: Conversation,
+        options: CompletionOptions = CompletionOptions(),
+        onChunk: StreamedChunk => Unit
+      ): Result[Completion] = {
+        Left(NetworkError("Connection timeout"))
       }
     }
 
@@ -91,7 +116,7 @@ class WeatherAgentSpec extends AnyFlatSpec with Matchers {
     val result = agent.run("What's the weather?")
     
     result match {
-      case Left(LLMError.NetworkError(_)) => succeed
+      case Left(_: NetworkError) => succeed
       case other => fail(s"Expected NetworkError but got: $other")
     }
   }
@@ -103,25 +128,40 @@ class WeatherAgentSpec extends AnyFlatSpec with Matchers {
 For more complex scenarios:
 
 ```scala
+import org.llm4s.error.InvalidRequestError
+
 class ConfigurableMockClient(responses: Map[String, String]) extends LLMClient {
-  override def complete(request: CompletionRequest): Result[CompletionResponse] = {
-    val userMessage = request.messages.find(_.role == "user").map(_.content).getOrElse("")
+  override def complete(
+    conversation: Conversation,
+    options: CompletionOptions = CompletionOptions()
+  ): Result[Completion] = {
+    val userMessage = conversation.messages
+      .collectFirst { case UserMessage(content) => content }
+      .getOrElse("")
     
     responses.get(userMessage) match {
       case Some(responseText) =>
-        Right(CompletionResponse(
+        Right(Completion(
+          id = "mock-1",
+          created = System.currentTimeMillis(),
           content = responseText,
-          finishReason = Some("stop"),
           model = "mock-model",
-          role = "assistant"
+          message = AssistantMessage(responseText)
         ))
       case None =>
-        Left(LLMError.InvalidRequest(s"No mock response for: $userMessage"))
+        Left(InvalidRequestError(s"No mock response for: $userMessage"))
     }
   }
 
-  override def completeStreaming(request: CompletionRequest): Result[Iterator[CompletionResponse]] = {
-    complete(request).map(response => Iterator(response))
+  override def streamComplete(
+    conversation: Conversation,
+    options: CompletionOptions = CompletionOptions(),
+    onChunk: StreamedChunk => Unit
+  ): Result[Completion] = {
+    complete(conversation, options).map { completion =>
+      onChunk(StreamedChunk(content = Some(completion.content), finishReason = Some("stop")))
+      completion
+    }
   }
 }
 
@@ -173,7 +213,7 @@ llm4s {
 ```scala
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.llmconnect.model.UserMessage
+import org.llm4s.llmconnect.model._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -199,8 +239,7 @@ class LLMIntegrationSpec extends AnyFlatSpec with Matchers {
       config <- Llm4sConfig.provider()
       client <- LLMConnect.getClient(config)
       response <- client.complete(
-        List(UserMessage("Say 'hello' and nothing else")),
-        None
+        Conversation(Seq(UserMessage("Say 'hello' and nothing else")))
       )
     } yield response
 
@@ -215,18 +254,19 @@ class LLMIntegrationSpec extends AnyFlatSpec with Matchers {
   it should "handle streaming responses" in {
     assume(ollamaAvailable, "Ollama server not available")
 
+    var chunks = List.empty[StreamedChunk]
     val result = for {
       config <- Llm4sConfig.provider()
       client <- LLMConnect.getClient(config)
-      stream <- client.completeStreaming(
-        List(UserMessage("Count: 1, 2, 3")),
-        None
-      )
-    } yield stream
+      completion <- client.streamComplete(
+        Conversation(Seq(UserMessage("Count: 1, 2, 3")))
+      ) { chunk =>
+        chunks = chunks :+ chunk
+      }
+    } yield completion
 
     result match {
-      case Right(stream) =>
-        val chunks = stream.toList
+      case Right(completion) =>
         chunks should not be empty
         chunks.last.finishReason should be(Some("stop"))
       case Left(error) =>
@@ -243,15 +283,24 @@ class LLMIntegrationSpec extends AnyFlatSpec with Matchers {
 Always test error paths:
 
 ```scala
+import org.llm4s.error.{RateLimitError, AuthenticationError, NetworkError}
+
 class ErrorHandlingSpec extends AnyFlatSpec with Matchers {
 
   "Agent" should "handle rate limiting" in {
     class RateLimitedClient extends LLMClient {
-      override def complete(request: CompletionRequest): Result[CompletionResponse] = {
-        Left(LLMError.RateLimitError("Rate limit exceeded"))
+      override def complete(
+        conversation: Conversation,
+        options: CompletionOptions = CompletionOptions()
+      ): Result[Completion] = {
+        Left(RateLimitError("Rate limit exceeded"))
       }
-      override def completeStreaming(request: CompletionRequest): Result[Iterator[CompletionResponse]] = {
-        Left(LLMError.RateLimitError("Rate limit exceeded"))
+      override def streamComplete(
+        conversation: Conversation,
+        options: CompletionOptions = CompletionOptions(),
+        onChunk: StreamedChunk => Unit
+      ): Result[Completion] = {
+        Left(RateLimitError("Rate limit exceeded"))
       }
     }
 
@@ -259,18 +308,25 @@ class ErrorHandlingSpec extends AnyFlatSpec with Matchers {
     val result = agent.run("test query", tools = ToolRegistry.empty)
 
     result match {
-      case Left(LLMError.RateLimitError(_)) => succeed
+      case Left(_: RateLimitError) => succeed
       case other => fail(s"Expected RateLimitError but got: $other")
     }
   }
 
   it should "handle authentication errors" in {
     class UnauthorizedClient extends LLMClient {
-      override def complete(request: CompletionRequest): Result[CompletionResponse] = {
-        Left(LLMError.AuthenticationError("Invalid API key"))
+      override def complete(
+        conversation: Conversation,
+        options: CompletionOptions = CompletionOptions()
+      ): Result[Completion] = {
+        Left(AuthenticationError("Invalid API key"))
       }
-      override def completeStreaming(request: CompletionRequest): Result[Iterator[CompletionResponse]] = {
-        Left(LLMError.AuthenticationError("Invalid API key"))
+      override def streamComplete(
+        conversation: Conversation,
+        options: CompletionOptions = CompletionOptions(),
+        onChunk: StreamedChunk => Unit
+      ): Result[Completion] = {
+        Left(AuthenticationError("Invalid API key"))
       }
     }
 
@@ -282,12 +338,19 @@ class ErrorHandlingSpec extends AnyFlatSpec with Matchers {
 
   it should "handle network timeouts" in {
     class TimeoutClient extends LLMClient {
-      override def complete(request: CompletionRequest): Result[CompletionResponse] = {
+      override def complete(
+        conversation: Conversation,
+        options: CompletionOptions = CompletionOptions()
+      ): Result[Completion] = {
         Thread.sleep(5000)  // Simulate timeout
-        Left(LLMError.NetworkError("Request timeout"))
+        Left(NetworkError("Request timeout"))
       }
-      override def completeStreaming(request: CompletionRequest): Result[Iterator[CompletionResponse]] = {
-        Left(LLMError.NetworkError("Request timeout"))
+      override def streamComplete(
+        conversation: Conversation,
+        options: CompletionOptions = CompletionOptions(),
+        onChunk: StreamedChunk => Unit
+      ): Result[Completion] = {
+        Left(NetworkError("Request timeout"))
       }
     }
 
@@ -295,7 +358,7 @@ class ErrorHandlingSpec extends AnyFlatSpec with Matchers {
     val result = agent.run("test", tools = ToolRegistry.empty)
 
     result match {
-      case Left(LLMError.NetworkError(_)) => succeed
+      case Left(_: NetworkError) => succeed
       case other => fail(s"Expected NetworkError but got: $other")
     }
   }
@@ -330,23 +393,31 @@ class ToolCallingSpec extends AnyFlatSpec with Matchers {
 
     // Mock client that calls the tool
     class ToolCallingMock extends LLMClient {
-      override def complete(request: CompletionRequest): Result[CompletionResponse] = {
-        Right(CompletionResponse(
+      override def complete(
+        conversation: Conversation,
+        options: CompletionOptions = CompletionOptions()
+      ): Result[Completion] = {
+        Right(Completion(
+          id = "mock-1",
+          created = System.currentTimeMillis(),
           content = "",
-          finishReason = Some("tool_calls"),
-          toolCalls = Some(List(
+          model = "mock-model",
+          message = AssistantMessage(""),
+          toolCalls = List(
             ToolCall(
               id = "call_1",
               name = "get_weather",
               arguments = Map("city" -> "London")
             )
-          )),
-          model = "mock",
-          role = "assistant"
+          )
         ))
       }
-      override def completeStreaming(request: CompletionRequest): Result[Iterator[CompletionResponse]] = {
-        complete(request).map(Iterator(_))
+      override def streamComplete(
+        conversation: Conversation,
+        options: CompletionOptions = CompletionOptions(),
+        onChunk: StreamedChunk => Unit
+      ): Result[Completion] = {
+        complete(conversation, options)
       }
     }
 
@@ -387,20 +458,34 @@ class RAGSpec extends AnyFlatSpec with Matchers {
   }
 
   "RAG pipeline" should "include context in LLM prompt" in {
-    val mockClient = new MockLLMClient {
+    class RAGMockClient extends LLMClient {
       var lastPrompt: Option[String] = None
 
-      override def complete(request: CompletionRequest): Result[CompletionResponse] = {
-        lastPrompt = request.messages.find(_.role == "user").map(_.content)
-        Right(CompletionResponse(
+      override def complete(
+        conversation: Conversation,
+        options: CompletionOptions = CompletionOptions()
+      ): Result[Completion] = {
+        lastPrompt = conversation.messages
+          .collectFirst { case UserMessage(content) => content }
+        Right(Completion(
+          id = "mock-1",
+          created = System.currentTimeMillis(),
           content = "Based on the context, Scala is functional.",
-          finishReason = Some("stop"),
-          model = "mock",
-          role = "assistant"
+          model = "mock-model",
+          message = AssistantMessage("Based on the context, Scala is functional.")
         ))
+      }
+
+      override def streamComplete(
+        conversation: Conversation,
+        options: CompletionOptions = CompletionOptions(),
+        onChunk: StreamedChunk => Unit
+      ): Result[Completion] = {
+        complete(conversation, options)
       }
     }
 
+    val mockClient = new RAGMockClient
     val rag = new RAGPipeline(mockClient, vectorStore, embedder)
     rag.query("What is Scala?")
 

@@ -211,23 +211,18 @@ For real-time output, use streaming:
 
 ```scala
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.llmconnect.model.UserMessage
+import org.llm4s.llmconnect.model._
 
 object StreamingExample extends App {
   val result = for {
     providerConfig <- Llm4sConfig.provider()
     client <- LLMConnect.getClient(providerConfig)
-    stream <- client.completeStreaming(
-      messages = List(UserMessage("Write a short poem about Scala")),
-      model = None
-    )
-  } yield {
-    print("Response: ")
-    stream.foreach { chunk =>
-      print(chunk.content)  // Print each token as it arrives
+    completion <- client.streamComplete(
+      conversation = Conversation(Seq(UserMessage("Write a short poem about Scala")))
+    ) { chunk =>
+      chunk.content.foreach(print)  // Print each token as it arrives
     }
-    println()
-  }
+  } yield completion
 
   result.fold(
     error => println(s"Error: $error"),
@@ -446,7 +441,9 @@ clientResult match {
   for {
     providerConfig <- Llm4sConfig.provider()
     client <- LLMConnect.getClient(providerConfig)  // Don't do this!
-    response <- client.complete(List(UserMessage(s"Q$i")), None)
+    response <- client.complete(
+      Conversation(Seq(UserMessage(s"Q$i")))
+    )
   } yield response
 }
 ```
@@ -456,22 +453,20 @@ clientResult match {
 Streaming gets you the first token faster and improves perceived latency:
 
 ```scala
-import org.llm4s.llmconnect.model.{CompletionRequest, UserMessage}
+import org.llm4s.llmconnect.model._
 
 val streamResult = for {
   providerConfig <- Llm4sConfig.provider()
   client <- LLMConnect.getClient(providerConfig)
-  stream <- client.completeStreaming(
-    List(UserMessage("Write a long essay about Scala")),
-    None
-  )
-} yield stream
+  completion <- client.streamComplete(
+    Conversation(Seq(UserMessage("Write a long essay about Scala")))
+  ) { chunk =>
+    chunk.content.foreach(print)  // Prints as tokens arrive
+  }
+} yield completion
 
 streamResult match {
-  case Right(stream) =>
-    stream.foreach { chunk =>
-      print(chunk.content)  // Prints as tokens arrive
-    }
+  case Right(completion) => println(s"\nCompleted with ${completion.usage.map(_.totalTokens).getOrElse(0)} tokens")
   case Left(error) => println(s"Error: $error")
 }
 ```
@@ -595,10 +590,11 @@ val embeddings = documents.map { doc =>
 Track costs in production:
 
 ```scala
-val response = client.complete(messages, None)
+val response = client.complete(Conversation(messages))
 
 response match {
   case Right(completion) =>
+    // Note: usage returns Option[TokenUsage], so these are Option[Int]
     println(s"Prompt tokens: ${completion.usage.map(_.promptTokens)}")
     println(s"Completion tokens: ${completion.usage.map(_.completionTokens)}")
     println(s"Total tokens: ${completion.usage.map(_.totalTokens)}")

@@ -715,6 +715,8 @@ sbt "runMain com.typesafe.config.impl.ConfigImpl"
 
 **Symptoms:**
 ```
+import org.llm4s.error.AuthenticationError
+
 Left(AuthenticationError("Invalid API key"))
 ```
 
@@ -735,6 +737,8 @@ OPENAI_API_KEY=              # ❌ Wrong - key is empty
 
 **Symptoms:**
 ```
+import org.llm4s.error.RateLimitError
+
 Left(RateLimitError("Rate limit exceeded"))
 ```
 
@@ -743,12 +747,15 @@ Left(RateLimitError("Rate limit exceeded"))
 1. **Add retry logic:**
 ```scala
 import scala.concurrent.duration._
-import scala.util.{Try, Success, Failure}
+import org.llm4s.error.RateLimitError
+import org.llm4s.types.Result
 
+// Note: This example uses Thread.sleep for simplicity.
+// In production, prefer scala.concurrent or cats-effect for non-blocking delays.
 def retryWithBackoff[A](op: => Result[A], maxRetries: Int = 3): Result[A] = {
   (1 to maxRetries).foldLeft(op) { (result, attempt) =>
     result match {
-      case Left(RateLimitError(_)) if attempt < maxRetries =>
+      case Left(_: RateLimitError) if attempt < maxRetries =>
         Thread.sleep(Math.pow(2, attempt).toLong * 1000)  // Exponential backoff
         op
       case other => other
