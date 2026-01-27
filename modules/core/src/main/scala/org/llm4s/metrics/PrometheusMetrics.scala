@@ -51,6 +51,14 @@ final class PrometheusMetrics(
     .labelNames("provider", "model", "type")
     .register(registry)
 
+  // Cost counter
+  private val costUsdTotal = Counter
+    .build()
+    .name("llm4s_cost_usd_total")
+    .help("Total estimated cost in USD")
+    .labelNames("provider", "model")
+    .register(registry)
+
   // Error counter
   private val errorsTotal = Counter
     .build()
@@ -82,7 +90,11 @@ final class PrometheusMetrics(
     Try {
       val status = outcome match {
         case Outcome.Success => "success"
-        case Outcome.Error(_) => "error"
+        case Outcome.Error(errorKind) =>
+          // Convert PascalCase to snake_case: RateLimit -> rate_limit
+          val kindStr = errorKind.toString
+          val snakeCase = kindStr.replaceAll("([A-Z])", "_$1").toLowerCase.drop(1)
+          s"error_$snakeCase"
       }
       
       requestsTotal.labels(provider, model, status).inc()
@@ -117,6 +129,24 @@ final class PrometheusMetrics(
     }.recover {
       case e: Exception =>
         logger.warn(s"Failed to record token metrics: ${e.getMessage}")
+    }
+  }
+
+  /**
+   * Record estimated cost in USD.
+   *
+   * Safe: catches and logs any Prometheus errors without propagating.
+   */
+  override def recordCost(
+    provider: String,
+    model: String,
+    costUsd: Double
+  ): Unit = {
+    Try {
+      costUsdTotal.labels(provider, model).inc(costUsd)
+    }.recover {
+      case e: Exception =>
+        logger.warn(s"Failed to record cost metrics: ${e.getMessage}")
     }
   }
 }

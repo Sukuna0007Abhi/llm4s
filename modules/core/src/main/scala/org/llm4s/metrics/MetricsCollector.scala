@@ -56,6 +56,19 @@ trait MetricsCollector {
     inputTokens: Long,
     outputTokens: Long
   ): Unit
+
+  /**
+   * Record estimated cost in USD.
+   *
+   * @param provider Provider name
+   * @param model Model name
+   * @param costUsd Estimated cost in USD
+   */
+  def recordCost(
+    provider: String,
+    model: String,
+    costUsd: Double
+  ): Unit
 }
 
 object MetricsCollector {
@@ -77,6 +90,12 @@ object MetricsCollector {
       model: String,
       inputTokens: Long,
       outputTokens: Long
+    ): Unit = ()
+
+    override def recordCost(
+      provider: String,
+      model: String,
+      costUsd: Double
     ): Unit = ()
   }
 }
