@@ -76,7 +76,20 @@ object PrometheusEndpoint {
   def start(port: Int, registry: CollectorRegistry): Result[PrometheusEndpoint] = {
     try {
       val server = new HTTPServer(new InetSocketAddress(port), registry)
-      val endpoint = new PrometheusEndpoint(server, port)
+      // HTTPServer binds immediately, so we can get actual port via reflection
+      val actualPort = if (port == 0) {
+        // When port is 0, OS assigns it - need to get it from the bound server
+        try {
+          val httpServerField = server.getClass.getDeclaredField("server")
+          httpServerField.setAccessible(true)
+          val httpServer = httpServerField.get(server).asInstanceOf[com.sun.net.httpserver.HttpServer]
+          httpServer.getAddress.getPort
+        } catch {
+          case _: Exception => port // fallback to requested port if reflection fails
+        }
+      } else port
+      
+      val endpoint = new PrometheusEndpoint(server, actualPort)
       
       logger.info(s"Prometheus metrics endpoint started: ${endpoint.url}")
       

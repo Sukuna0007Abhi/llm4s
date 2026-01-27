@@ -37,6 +37,7 @@ object LLMConnect {
   def getClient(config: ProviderConfig): Result[LLMClient] =
     buildClient(config, MetricsCollector.noop)
 
+  // Provider-typed entry with explicit metrics
   def getClient(
     provider: LLMProvider,
     config: ProviderConfig,
@@ -55,4 +56,11 @@ object LLMConnect {
         val msg     = s"Invalid config type $cfgType for provider $prov"
         Left(ConfigurationError(msg))
     }
+
+  // Convenience overload with noop metrics default
+  def getClient(
+    provider: LLMProvider,
+    config: ProviderConfig
+  ): Result[LLMClient] =
+    getClient(provider, config, MetricsCollector.noop)
 }
