@@ -9,25 +9,28 @@ import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
 import org.llm4s.error.ThrowableOps._
+import org.llm4s.metrics.{ ErrorKind, MetricsCollector, Outcome }
 
 import java.net.URI
 import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.time.Duration
+import scala.concurrent.duration.{ FiniteDuration, NANOSECONDS }
 import java.io.{ BufferedReader, InputStreamReader }
 import java.nio.charset.StandardCharsets
 import scala.util.Try
 
 class OpenRouterClient(
   config: OpenAIConfig,
-  @annotation.nowarn("msg=unused") private val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
+  private val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
 ) extends LLMClient {
-  // TODO: Integrate metrics collection (observeRequest, addTokens) like OpenAIClient
   private val httpClient = HttpClient.newHttpClient()
 
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
   ): Result[Completion] = {
+    val startNanos = System.nanoTime()
+
     // Convert conversation to OpenRouter format
     val requestBody = createRequestBody(conversation, options)
 
@@ -48,7 +51,7 @@ class OpenRouterClient(
       }.toEither.left
         .map(_.toLLMError)
 
-    attempt.flatMap { response =>
+    val result = attempt.flatMap { response =>
       // Handle response status
       response.statusCode() match {
         case 200 =>
@@ -59,6 +62,24 @@ class OpenRouterClient(
         case status => Left(ServiceError(status, "openrouter", s"OpenRouter API error: ${response.body()}"))
       }
     }
+
+    // Record metrics
+    val duration = scala.concurrent.duration.FiniteDuration(
+      System.nanoTime() - startNanos,
+      scala.concurrent.duration.NANOSECONDS
+    )
+    result match {
+      case Right(completion) =>
+        metrics.observeRequest("openrouter", config.model, org.llm4s.metrics.Outcome.Success, duration)
+        completion.usage.foreach { usage =>
+          metrics.addTokens("openrouter", config.model, usage.promptTokens.toLong, usage.completionTokens.toLong)
+        }
+      case Left(error) =>
+        val errorKind = org.llm4s.metrics.ErrorKind.fromLLMError(error)
+        metrics.observeRequest("openrouter", config.model, org.llm4s.metrics.Outcome.Error(errorKind), duration)
+    }
+
+    result
   }
 
   override def streamComplete(
@@ -66,6 +87,7 @@ class OpenRouterClient(
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
+    val startNanos = System.nanoTime()
     val requestBody = createRequestBody(conversation, options)
     requestBody("stream") = true
 
@@ -124,7 +146,18 @@ class OpenRouterClient(
       }.toEither.left
         .map(_.toLLMError)
 
-    attempt.flatMap(_ => accumulator.toCompletion)
+    val result = attempt.flatMap(_ => accumulator.toCompletion)
+
+    // Record metrics
+    val duration = FiniteDuration(System.nanoTime() - startNanos, NANOSECONDS)
+    result match {
+      case Right(completion) =>
+        metrics.observeRequest("openrouter", config.model, Outcome.Success, duration)
+        completion.usage.foreach(u => metrics.addTokens("openrouter", config.model, u.promptTokens, u.completionTokens))
+      case Left(error) =>
+        metrics.observeRequest("openrouter", config.model, Outcome.Error(ErrorKind.fromLLMError(error)), duration)
+    }
+    result
   }
 
   private def parseStreamingChunks(json: ujson.Value): Seq[StreamedChunk] = {

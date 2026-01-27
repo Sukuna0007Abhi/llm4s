@@ -9,6 +9,7 @@ import org.llm4s.llmconnect.streaming._
 import org.llm4s.model.TransformationResult
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.types.Result
+import org.llm4s.metrics.{ ErrorKind, MetricsCollector, Outcome }
 import org.slf4j.LoggerFactory
 
 import java.io.{ BufferedReader, InputStreamReader }
@@ -16,6 +17,7 @@ import java.net.URI
 import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.nio.charset.StandardCharsets
 import java.time.Duration
+import scala.concurrent.duration.{ FiniteDuration, NANOSECONDS }
 import java.util.UUID
 import scala.util.Try
 
@@ -45,18 +47,24 @@ import scala.util.Try
  * - Tool calls use `functionDeclarations` format
  *
  * @param config Gemini configuration with API key, model, and base URL
+ * @param metrics metrics collector for observability (default: noop)
  *
  * @see [[org.llm4s.llmconnect.config.GeminiConfig]] for configuration options
  */
-class GeminiClient(config: GeminiConfig) extends LLMClient {
+class GeminiClient(
+  config: GeminiConfig,
+  private val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
+) extends LLMClient {
   private val logger     = LoggerFactory.getLogger(getClass)
   private val httpClient = HttpClient.newHttpClient()
 
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] =
-    TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
+  ): Result[Completion] = {
+    val startNanos = System.nanoTime()
+
+    val result = TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
       transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
@@ -88,11 +96,31 @@ class GeminiClient(config: GeminiConfig) extends LLMClient {
         attempt
     }
 
+    // Record metrics
+    val duration = scala.concurrent.duration.FiniteDuration(
+      System.nanoTime() - startNanos,
+      scala.concurrent.duration.NANOSECONDS
+    )
+    result match {
+      case Right(completion) =>
+        metrics.observeRequest("gemini", config.model, org.llm4s.metrics.Outcome.Success, duration)
+        completion.usage.foreach { usage =>
+          metrics.addTokens("gemini", config.model, usage.promptTokens.toLong, usage.completionTokens.toLong)
+        }
+      case Left(error) =>
+        val errorKind = org.llm4s.metrics.ErrorKind.fromLLMError(error)
+        metrics.observeRequest("gemini", config.model, org.llm4s.metrics.Outcome.Error(errorKind), duration)
+    }
+
+    result
+  }
+
   override def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] =
+  ): Result[Completion] = {
+    val startNanos = System.nanoTime()
     TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
       transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
@@ -143,11 +171,23 @@ class GeminiClient(config: GeminiConfig) extends LLMClient {
           Try(reader.close())
           Try(response.body().close())
 
-          processEither.left
+          val result = processEither.left
             .map(_.toLLMError)
             .flatMap(_ => accumulator.toCompletion.map(c => c.copy(model = config.model)))
+
+          // Record metrics
+          val duration = FiniteDuration(System.nanoTime() - startNanos, NANOSECONDS)
+          result match {
+            case Right(completion) =>
+              metrics.observeRequest("gemini", config.model, Outcome.Success, duration)
+              completion.usage.foreach(u => metrics.addTokens("gemini", config.model, u.promptTokens, u.completionTokens))
+            case Left(error) =>
+              metrics.observeRequest("gemini", config.model, Outcome.Error(ErrorKind.fromLLMError(error)), duration)
+          }
+          result
         }
     }
+  }
 
   override def getContextWindow(): Int = config.contextWindow
 
@@ -429,4 +469,7 @@ object GeminiClient {
 
   def apply(config: GeminiConfig): Result[GeminiClient] =
     Try(new GeminiClient(config)).toResult
+
+  def apply(config: GeminiConfig, metrics: org.llm4s.metrics.MetricsCollector): Result[GeminiClient] =
+    Try(new GeminiClient(config, metrics)).toResult
 }

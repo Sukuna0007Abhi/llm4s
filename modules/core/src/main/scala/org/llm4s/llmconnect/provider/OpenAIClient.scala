@@ -147,8 +147,10 @@ class OpenAIClient private (
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] =
-    validateNotClosed.flatMap { _ =>
+  ): Result[Completion] = {
+    val startNanos = System.nanoTime()
+
+    val result = validateNotClosed.flatMap { _ =>
       // Transform options and messages for model-specific constraints
       TransformationResult.transform(model, options, conversation.messages, dropUnsupported = true).flatMap {
         transformed =>
@@ -163,6 +165,25 @@ class OpenAIClient private (
           }
       }
     }
+
+    // Record metrics
+    val duration = scala.concurrent.duration.FiniteDuration(
+      System.nanoTime() - startNanos,
+      scala.concurrent.duration.NANOSECONDS
+    )
+    result match {
+      case Right(completion) =>
+        metrics.observeRequest("openai", model, org.llm4s.metrics.Outcome.Success, duration)
+        completion.usage.foreach { usage =>
+          metrics.addTokens("openai", model, usage.promptTokens.toLong, usage.completionTokens.toLong)
+        }
+      case Left(error) =>
+        val errorKind = org.llm4s.metrics.ErrorKind.fromLLMError(error)
+        metrics.observeRequest("openai", model, org.llm4s.metrics.Outcome.Error(errorKind), duration)
+    }
+
+    result
+  }
 
   override def close(): Unit =
     // Mark client as closed to prevent further operations.

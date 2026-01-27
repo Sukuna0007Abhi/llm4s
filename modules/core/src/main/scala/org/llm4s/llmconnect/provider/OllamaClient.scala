@@ -5,6 +5,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
+import org.llm4s.metrics.{ ErrorKind, MetricsCollector, Outcome }
 import org.llm4s.types.Result
 
 import java.io.{ BufferedReader, InputStreamReader }
@@ -12,6 +13,7 @@ import java.net.URI
 import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.nio.charset.StandardCharsets
 import java.time.Duration
+import scala.concurrent.duration.{ FiniteDuration, NANOSECONDS }
 import scala.util.Try
 
 class OllamaClient(
@@ -73,6 +75,7 @@ class OllamaClient(
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
+    val startNanos = System.nanoTime()
     val requestBody = createRequestBody(conversation, options, stream = true)
     val request = HttpRequest
       .newBuilder()
@@ -133,7 +136,18 @@ class OllamaClient(
     Try(response.body().close())
     processEither.left.foreach(_ => ())
 
-    accumulator.toCompletion
+    val result = accumulator.toCompletion
+
+    // Record metrics
+    val duration = FiniteDuration(System.nanoTime() - startNanos, NANOSECONDS)
+    result match {
+      case Right(completion) =>
+        metrics.observeRequest("ollama", config.model, Outcome.Success, duration)
+        completion.usage.foreach(u => metrics.addTokens("ollama", config.model, u.promptTokens, u.completionTokens))
+      case Left(error) =>
+        metrics.observeRequest("ollama", config.model, Outcome.Error(ErrorKind.fromLLMError(error)), duration)
+    }
+    result
   }
 
   private def createRequestBody(

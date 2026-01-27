@@ -138,8 +138,10 @@ curl https://api.anthropic.com/v1/messages \
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
+    val startNanos = System.nanoTime()
+
     // Transform options and messages for model-specific constraints
-    TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
+    val result = TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
       transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
 
@@ -294,6 +296,24 @@ curl https://api.anthropic.com/v1/messages \
         // Return the accumulated completion
         attempt.flatMap(_ => accumulator.toCompletion.map(c => c.copy(model = config.model)))
     }
+
+    // Record metrics
+    val duration = scala.concurrent.duration.FiniteDuration(
+      System.nanoTime() - startNanos,
+      scala.concurrent.duration.NANOSECONDS
+    )
+    result match {
+      case Right(completion) =>
+        metrics.observeRequest("anthropic", config.model, org.llm4s.metrics.Outcome.Success, duration)
+        completion.usage.foreach { usage =>
+          metrics.addTokens("anthropic", config.model, usage.promptTokens.toLong, usage.completionTokens.toLong)
+        }
+      case Left(error) =>
+        val errorKind = org.llm4s.metrics.ErrorKind.fromLLMError(error)
+        metrics.observeRequest("anthropic", config.model, org.llm4s.metrics.Outcome.Error(errorKind), duration)
+    }
+
+    result
   }
 
   override def getContextWindow(): Int = providerConfig.contextWindow
