@@ -1,6 +1,6 @@
 package org.llm4s.metrics
 
-import io.prometheus.client.CollectorRegistry
+import io.prometheus.metrics.model.registry.PrometheusRegistry
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -28,7 +28,7 @@ class PrometheusMetricsSpec extends AnyWordSpec with Matchers {
 
   "PrometheusEndpoint" should {
     "start HTTP server on specified port" in {
-      val registry = new CollectorRegistry()
+      val registry = new PrometheusRegistry()
       val result = PrometheusEndpoint.start(port = 0, registry) // OS assigns port
 
       result should be a Symbol("right")
@@ -40,7 +40,7 @@ class PrometheusMetricsSpec extends AnyWordSpec with Matchers {
     }
 
     "fail if port is already in use" in {
-      val registry = new CollectorRegistry()
+      val registry = new PrometheusRegistry()
       val endpoint1 = PrometheusEndpoint.start(port = 0, registry).toOption.get
       val actualPort = endpoint1.port
 
@@ -262,34 +262,81 @@ class PrometheusMetricsSpec extends AnyWordSpec with Matchers {
 
   // Helper methods for extracting metric values
 
-  private def getMetricValue(registry: CollectorRegistry, name: String, labels: Map[String, String]): Double = {
-    // Get all samples from all metric families
-    val allSamples = registry.metricFamilySamples().asScala.flatMap(_.samples.asScala)
+  private def getMetricValue(registry: PrometheusRegistry, name: String, labels: Map[String, String]): Double = {
+    // Prometheus 1.x automatically strips _total suffix from counter names
+    val lookupName = name.stripSuffix("_total")
+    val snapshots = registry.scrape()
     
-    // Find the sample that matches both the name and all labels
-    allSamples
-      .find { sample =>
-        sample.name == name && labels.forall { case (labelName, labelValue) =>
-          val labelNames = sample.labelNames.asScala
-          val labelValues = sample.labelValues.asScala
-          val index = labelNames.indexOf(labelName)
-          index >= 0 && labelValues.lift(index).contains(labelValue)
-        }
+    snapshots.stream().iterator().asScala
+      .find(_.getMetadata.getName == lookupName)
+      .flatMap { metricSnapshot =>
+        metricSnapshot.getDataPoints.iterator().asScala
+          .find { dataPoint =>
+            val dpLabels = dataPoint.getLabels.iterator().asScala.map(l => l.getName -> l.getValue).toMap
+            labels.forall { case (k, v) => dpLabels.get(k).contains(v) }
+          }
+          .map { dataPoint =>
+            dataPoint match {
+              case c: io.prometheus.metrics.model.snapshots.CounterSnapshot.CounterDataPointSnapshot =>
+                c.getValue
+              case h: io.prometheus.metrics.model.snapshots.HistogramSnapshot.HistogramDataPointSnapshot =>
+                h.getCount.toDouble
+              case _ => 0.0
+            }
+          }
       }
-      .map(_.value)
       .getOrElse(0.0)
   }
 
-  private def getHistogramCount(registry: CollectorRegistry, name: String, labels: Map[String, String]): Double = {
-    getMetricValue(registry, s"${name}_count", labels)
+  private def getHistogramCount(registry: PrometheusRegistry, name: String, labels: Map[String, String]): Double = {
+    // Prometheus 1.x automatically strips _total suffix from counter names (not applicable to histograms, but for consistency)
+    val lookupName = name.stripSuffix("_total")
+    val snapshots = registry.scrape()
+    
+    snapshots.stream().iterator().asScala
+      .find(_.getMetadata.getName == lookupName)
+      .flatMap { metricSnapshot =>
+        metricSnapshot.getDataPoints.iterator().asScala
+          .find { dataPoint =>
+            val dpLabels = dataPoint.getLabels.iterator().asScala.map(l => l.getName -> l.getValue).toMap
+            labels.forall { case (k, v) => dpLabels.get(k).contains(v) }
+          }
+          .collect {
+            case h: io.prometheus.metrics.model.snapshots.HistogramSnapshot.HistogramDataPointSnapshot =>
+              h.getCount.toDouble
+          }
+      }
+      .getOrElse(0.0)
   }
 
   private def getHistogramBucketValue(
-    registry: CollectorRegistry,
+    registry: PrometheusRegistry,
     name: String,
     labels: Map[String, String],
     le: String
   ): Double = {
-    getMetricValue(registry, s"${name}_bucket", labels + ("le" -> le))
+    // Prometheus 1.x automatically strips _total suffix from counter names (not applicable to histograms, but for consistency)
+    val lookupName = name.stripSuffix("_total")
+    val snapshots = registry.scrape()
+    
+    snapshots.stream().iterator().asScala
+      .find(_.getMetadata.getName == lookupName)
+      .flatMap { metricSnapshot =>
+        metricSnapshot.getDataPoints.iterator().asScala
+          .find { dataPoint =>
+            val dpLabels = dataPoint.getLabels.iterator().asScala.map(l => l.getName -> l.getValue).toMap
+            labels.forall { case (k, v) => dpLabels.get(k).contains(v) }
+          }
+          .collect {
+            case h: io.prometheus.metrics.model.snapshots.HistogramSnapshot.HistogramDataPointSnapshot =>
+              val leValue = le.toDouble
+              // Sum all buckets up to and including the requested upper bound (cumulative count)
+              h.getClassicBuckets.iterator().asScala
+                .filter(_.getUpperBound <= leValue + 0.0001) // Include bucket if upperBound <= requested le
+                .map(_.getCount.toDouble)
+                .sum
+          }
+      }
+      .getOrElse(0.0)
   }
 }

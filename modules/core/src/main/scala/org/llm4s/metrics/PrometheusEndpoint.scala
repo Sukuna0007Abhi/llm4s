@@ -1,12 +1,10 @@
 package org.llm4s.metrics
 
-import io.prometheus.client.CollectorRegistry
-import io.prometheus.client.exporter.HTTPServer
+import io.prometheus.metrics.model.registry.PrometheusRegistry
+import io.prometheus.metrics.exporter.httpserver.HTTPServer
 import org.llm4s.types.Result
 import org.llm4s.error.ConfigurationError
 import org.slf4j.LoggerFactory
-
-import java.net.InetSocketAddress
 
 /**
  * HTTP endpoint for exposing Prometheus metrics.
@@ -16,7 +14,7 @@ import java.net.InetSocketAddress
  *
  * Example:
  * {{{
- * val registry = new CollectorRegistry()
+ * val registry = new PrometheusRegistry()
  * val endpointResult = PrometheusEndpoint.start(9090, registry)
  * 
  * endpointResult match {
@@ -73,19 +71,19 @@ object PrometheusEndpoint {
    * @param registry Prometheus collector registry containing metrics
    * @return Right(endpoint) on success, Left(error) if port unavailable or other failure
    */
-  def start(port: Int, registry: CollectorRegistry): Result[PrometheusEndpoint] = {
+  def start(port: Int, registry: PrometheusRegistry): Result[PrometheusEndpoint] = {
     try {
-      val server = new HTTPServer(new InetSocketAddress(port), registry)
-      // HTTPServer binds immediately, so we can get actual port via reflection
+      val server = HTTPServer.builder()
+        .port(port)
+        .registry(registry)
+        .buildAndStart()
+      // HTTPServer binds immediately, so we can get actual port
       val actualPort = if (port == 0) {
         // When port is 0, OS assigns it - need to get it from the bound server
         try {
-          val httpServerField = server.getClass.getDeclaredField("server")
-          httpServerField.setAccessible(true)
-          val httpServer = httpServerField.get(server).asInstanceOf[com.sun.net.httpserver.HttpServer]
-          httpServer.getAddress.getPort
+          server.getPort
         } catch {
-          case _: Exception => port // fallback to requested port if reflection fails
+          case _: Exception => port // fallback to requested port if fails
         }
       } else port
       

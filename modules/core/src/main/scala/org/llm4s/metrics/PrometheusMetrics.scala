@@ -1,6 +1,7 @@
 package org.llm4s.metrics
 
-import io.prometheus.client.{ Counter, Histogram, CollectorRegistry }
+import io.prometheus.metrics.core.metrics.{ Counter, Histogram }
+import io.prometheus.metrics.model.registry.PrometheusRegistry
 import org.slf4j.LoggerFactory
 
 import scala.concurrent.duration.FiniteDuration
@@ -17,7 +18,7 @@ import scala.util.Try
  *
  * Example usage:
  * {{{
- * val registry = new CollectorRegistry()
+ * val registry = new PrometheusRegistry()
  * val metrics = new PrometheusMetrics(registry)
  * 
  * // Use with endpoint
@@ -30,50 +31,45 @@ import scala.util.Try
  * @param registry Prometheus collector registry
  */
 final class PrometheusMetrics(
-  private[llm4s] val registry: CollectorRegistry
+  private[llm4s] val registry: PrometheusRegistry
 ) extends MetricsCollector {
 
   private val logger = LoggerFactory.getLogger(getClass)
 
   // Request counter with labels
-  private val requestsTotal = Counter
-    .build()
+  private val requestsTotal = Counter.builder()
     .name("llm4s_requests_total")
     .help("Total number of LLM requests")
     .labelNames("provider", "model", "status")
     .register(registry)
 
   // Token counter
-  private val tokensTotal = Counter
-    .build()
+  private val tokensTotal = Counter.builder()
     .name("llm4s_tokens_total")
     .help("Total tokens consumed")
     .labelNames("provider", "model", "type")
     .register(registry)
 
   // Cost counter
-  private val costUsdTotal = Counter
-    .build()
+  private val costUsdTotal = Counter.builder()
     .name("llm4s_cost_usd_total")
     .help("Total estimated cost in USD")
     .labelNames("provider", "model")
     .register(registry)
 
   // Error counter
-  private val errorsTotal = Counter
-    .build()
+  private val errorsTotal = Counter.builder()
     .name("llm4s_errors_total")
     .help("Total number of errors")
     .labelNames("provider", "error_type")
     .register(registry)
 
   // Request duration histogram
-  private val requestDuration = Histogram
-    .build()
+  private val requestDuration = Histogram.builder()
     .name("llm4s_request_duration_seconds")
     .help("Request duration in seconds")
     .labelNames("provider", "model")
-    .buckets(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0)
+    .classicUpperBounds(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0)
     .register(registry)
 
   /**
@@ -97,13 +93,13 @@ final class PrometheusMetrics(
           s"error_$snakeCase"
       }
       
-      requestsTotal.labels(provider, model, status).inc()
-      requestDuration.labels(provider, model).observe(duration.toMillis / 1000.0)
+      requestsTotal.labelValues(provider, model, status).inc()
+      requestDuration.labelValues(provider, model).observe(duration.toMillis / 1000.0)
       
       outcome match {
         case Outcome.Error(errorKind) =>
           val errorLabel = errorKind.toString.toLowerCase
-          errorsTotal.labels(provider, errorLabel).inc()
+          errorsTotal.labelValues(provider, errorLabel).inc()
         case _ => // No additional action for success
       }
     }.recover {
@@ -124,8 +120,8 @@ final class PrometheusMetrics(
     outputTokens: Long
   ): Unit = {
     Try {
-      tokensTotal.labels(provider, model, "input").inc(inputTokens.toDouble)
-      tokensTotal.labels(provider, model, "output").inc(outputTokens.toDouble)
+      tokensTotal.labelValues(provider, model, "input").inc(inputTokens.toDouble)
+      tokensTotal.labelValues(provider, model, "output").inc(outputTokens.toDouble)
     }.recover {
       case e: Exception =>
         logger.warn(s"Failed to record token metrics: ${e.getMessage}")
@@ -143,7 +139,7 @@ final class PrometheusMetrics(
     costUsd: Double
   ): Unit = {
     Try {
-      costUsdTotal.labels(provider, model).inc(costUsd)
+      costUsdTotal.labelValues(provider, model).inc(costUsd)
     }.recover {
       case e: Exception =>
         logger.warn(s"Failed to record cost metrics: ${e.getMessage}")
@@ -162,7 +158,7 @@ object PrometheusMetrics {
    * @return New PrometheusMetrics instance
    */
   def create(): PrometheusMetrics = {
-    val registry = new CollectorRegistry()
+    val registry = new PrometheusRegistry()
     new PrometheusMetrics(registry)
   }
 }
