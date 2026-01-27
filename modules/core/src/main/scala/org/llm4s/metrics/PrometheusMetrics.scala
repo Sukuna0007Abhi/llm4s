@@ -1,33 +1,37 @@
 package org.llm4s.metrics
 
 import io.prometheus.client.{ Counter, Histogram, CollectorRegistry }
-import io.prometheus.client.exporter.HTTPServer
-import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
-import java.net.InetSocketAddress
+import scala.concurrent.duration.FiniteDuration
+import scala.util.Try
 
 /**
- * Prometheus metrics collector for LLM operations.
+ * Prometheus implementation of MetricsCollector.
  *
- * Tracks request volumes, token usage, costs, errors, and latency across
- * different providers and models. Exposes metrics via HTTP endpoint for
- * Prometheus scraping.
+ * Tracks request volumes, token usage, errors, and latency across
+ * different providers and models using Prometheus metrics.
+ *
+ * All operations are wrapped in try-catch to ensure metric failures
+ * never propagate to callers. This implementation is thread-safe.
  *
  * Example usage:
  * {{{
- * val metrics = PrometheusMetrics.start(port = 9090)
- * metrics.recordSuccess("openai", "gpt-4", durationMs = 1234)
- * metrics.recordTokens(usage, "openai", "gpt-4")
+ * val registry = new CollectorRegistry()
+ * val metrics = new PrometheusMetrics(registry)
+ * 
+ * // Use with endpoint
+ * PrometheusEndpoint.start(9090, registry).foreach { endpoint =>
+ *   // ... use metrics ...
+ *   endpoint.stop()
+ * }
  * }}}
  *
  * @param registry Prometheus collector registry
- * @param serverOpt Optional HTTP server for metrics endpoint
  */
-class PrometheusMetrics private (
-  private[metrics] val registry: CollectorRegistry,
-  private val serverOpt: Option[HTTPServer]
-) {
+final class PrometheusMetrics(
+  private[metrics] val registry: CollectorRegistry
+) extends MetricsCollector {
 
   private val logger = LoggerFactory.getLogger(getClass)
 
@@ -73,81 +77,54 @@ class PrometheusMetrics private (
     .register(registry)
 
   /**
-   * Record a successful request.
+   * Record an LLM request with its outcome and duration.
    *
-   * @param provider Provider name (e.g., "openai", "anthropic")
-   * @param model Model name (e.g., "gpt-4")
-   * @param durationMs Request duration in milliseconds
+   * Safe: catches and logs any Prometheus errors without propagating.
    */
-  def recordSuccess(provider: String, model: String, durationMs: Long): Unit = {
-    requestsTotal.labels(provider, model, "success").inc()
-    requestDuration.labels(provider, model).observe(durationMs / 1000.0)
+  override def observeRequest(
+    provider: String,
+    model: String,
+    outcome: Outcome,
+    duration: FiniteDuration
+  ): Unit = {
+    Try {
+      val status = outcome match {
+        case Outcome.Success => "success"
+        case Outcome.Error(_) => "error"
+      }
+      
+      requestsTotal.labels(provider, model, status).inc()
+      requestDuration.labels(provider, model).observe(duration.toMillis / 1000.0)
+      
+      outcome match {
+        case Outcome.Error(errorKind) =>
+          val errorLabel = errorKind.toString.toLowerCase
+          errorsTotal.labels(provider, errorLabel).inc()
+        case _ => // No additional action for success
+      }
+    }.recover {
+      case e: Exception =>
+        logger.warn(s"Failed to record request metrics: ${e.getMessage}")
+    }
   }
 
   /**
    * Record token usage.
    *
-   * @param inputTokens Number of input tokens
-   * @param outputTokens Number of output tokens
-   * @param provider Provider name
-   * @param model Model name
+   * Safe: catches and logs any Prometheus errors without propagating.
    */
-  def recordTokens(
-    inputTokens: Int,
-    outputTokens: Int,
-    provider: String,
-    model: String
-  ): Unit = {
-    tokensTotal.labels(provider, model, "input").inc(inputTokens.toDouble)
-    tokensTotal.labels(provider, model, "output").inc(outputTokens.toDouble)
-  }
-
-  /**
-   * Record estimated cost.
-   *
-   * @param costUsd Cost in USD
-   * @param provider Provider name
-   * @param model Model name
-   */
-  def recordCost(costUsd: Double, provider: String, model: String): Unit = {
-    costUsdTotal.labels(provider, model).inc(costUsd)
-  }
-
-  /**
-   * Record an error.
-   *
-   * @param provider Provider name
-   * @param model Model name
-   * @param errorType Error type (e.g., "rate_limit", "timeout")
-   * @param durationMs Optional duration before error
-   */
-  def recordError(
+  override def addTokens(
     provider: String,
     model: String,
-    errorType: String,
-    durationMs: Option[Long] = None
+    inputTokens: Long,
+    outputTokens: Long
   ): Unit = {
-    requestsTotal.labels(provider, model, "error").inc()
-    errorsTotal.labels(provider, errorType).inc()
-    durationMs.foreach { ms =>
-      requestDuration.labels(provider, model).observe(ms / 1000.0)
-    }
-  }
-
-  /**
-   * Get the metrics endpoint URL.
-   */
-  def getEndpoint: Option[String] = serverOpt.map { server =>
-    s"http://localhost:${server.getPort}/metrics"
-  }
-
-  /**
-   * Stop the HTTP server.
-   */
-  def stop(): Unit = {
-    serverOpt.foreach { server =>
-      logger.info("Stopping Prometheus metrics server")
-      server.close()
+    Try {
+      tokensTotal.labels(provider, model, "input").inc(inputTokens.toDouble)
+      tokensTotal.labels(provider, model, "output").inc(outputTokens.toDouble)
+    }.recover {
+      case e: Exception =>
+        logger.warn(s"Failed to record token metrics: ${e.getMessage}")
     }
   }
 }
@@ -155,58 +132,15 @@ class PrometheusMetrics private (
 object PrometheusMetrics {
 
   /**
-   * Create and start a PrometheusMetrics instance with HTTP server.
+   * Create a new PrometheusMetrics instance with a fresh registry.
    *
-   * @param port Port for HTTP metrics endpoint (default: 9090)
-   * @return Result containing PrometheusMetrics instance
-   */
-  def start(port: Int = 9090): Result[PrometheusMetrics] = {
-    try {
-      val registry = new CollectorRegistry()
-      val server   = new HTTPServer(new InetSocketAddress(port), registry)
-      val metrics  = new PrometheusMetrics(registry, Some(server))
-
-      org.slf4j.LoggerFactory
-        .getLogger(getClass)
-        .info(s"Prometheus metrics server started on port $port")
-
-      Right(metrics)
-    } catch {
-      case e: Exception =>
-        Left(
-          org.llm4s.error.ConfigurationError(
-            message = s"Failed to start Prometheus server on port $port: ${e.getMessage}"
-          )
-        )
-    }
-  }
-
-  /**
-   * Create a PrometheusMetrics instance without HTTP server.
-   * Useful for testing or when exposing metrics through existing HTTP server.
+   * Use this when you want an isolated metrics collector, e.g., for testing
+   * or when you'll expose metrics through your own HTTP endpoint.
    *
-   * @return PrometheusMetrics instance
+   * @return New PrometheusMetrics instance
    */
   def create(): PrometheusMetrics = {
     val registry = new CollectorRegistry()
-    new PrometheusMetrics(registry, None)
-  }
-
-  /**
-   * Get the default global PrometheusMetrics instance.
-   * Creates one if it doesn't exist yet.
-   */
-  @volatile private var globalInstance: Option[PrometheusMetrics] = None
-
-  def default: PrometheusMetrics = {
-    globalInstance.getOrElse {
-      synchronized {
-        globalInstance.getOrElse {
-          val metrics = create()
-          globalInstance = Some(metrics)
-          metrics
-        }
-      }
-    }
+    new PrometheusMetrics(registry)
   }
 }

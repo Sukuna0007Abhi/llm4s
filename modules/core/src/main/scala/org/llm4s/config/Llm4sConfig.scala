@@ -1,6 +1,7 @@
 package org.llm4s.config
 
 import org.llm4s.llmconnect.config._
+import org.llm4s.metrics.{ MetricsCollector, PrometheusEndpoint }
 import org.llm4s.types.Result
 import pureconfig.ConfigSource
 
@@ -12,17 +13,19 @@ object Llm4sConfig {
   def pgSearchIndex(): Result[org.llm4s.rag.permissions.SearchIndex.PgConfig] =
     org.llm4s.config.PgSearchIndexConfigLoader.load(ConfigSource.default)
 
-  final private case class LangfuseSection(
-    url: Option[String],
-    publicKey: Option[String],
-    secretKey: Option[String],
-    env: Option[String],
-    release: Option[String],
-    version: Option[String]
-  )
-
   def tracing(): Result[TracingSettings] =
     org.llm4s.config.TracingConfigLoader.load(ConfigSource.default)
+
+  /**
+   * Load the metrics configuration.
+   *
+   * Returns a MetricsCollector and optional PrometheusEndpoint if metrics are enabled.
+   * Use MetricsCollector.noop if you want to disable metrics programmatically.
+   *
+   * @return Result containing (MetricsCollector, Option[PrometheusEndpoint])
+   */
+  def metrics(): Result[(MetricsCollector, Option[PrometheusEndpoint])] =
+    org.llm4s.config.MetricsConfigLoader.load(ConfigSource.default)
 
   final case class EmbeddingsChunkingSettings(
     enabled: Boolean,
