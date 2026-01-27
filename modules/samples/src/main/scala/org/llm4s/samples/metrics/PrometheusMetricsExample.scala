@@ -3,7 +3,7 @@ package org.llm4s.samples.metrics
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
-import org.llm4s.metrics.PrometheusMetrics
+import org.llm4s.metrics.{MetricsCollector, PrometheusEndpoint}
 import org.slf4j.LoggerFactory
 
 /**
@@ -57,19 +57,19 @@ import org.slf4j.LoggerFactory
  *
  * == Integration Patterns ==
  *
- * '''Option 1: Explicit Server (for demos/testing)'''
+ * '''Option 1: From Configuration (recommended)'''
  * {{{
- * val metrics = PrometheusMetrics.start(port = 9090).toOption.get
+ * val (metrics, endpointOpt) = Llm4sConfig.metrics().toOption.get
+ * val client = LLMConnect.getClient(config, metrics).toOption.get
  * // ... make LLM calls ...
- * metrics.stop()
+ * endpointOpt.foreach(_.stop())
  * }}}
  *
- * '''Option 2: Default Singleton (production)'''
+ * '''Option 2: Noop Metrics (when disabled)'''
  * {{{
- * // Metrics are automatically recorded using PrometheusMetrics.default
- * // No need to start server explicitly - metrics are collected in-memory
- * // Expose via your application's existing HTTP server
- * val metricsText = PrometheusMetrics.default.registry.toString
+ * val metrics = MetricsCollector.noop
+ * val client = LLMConnect.getClient(config, metrics).toOption.get
+ * // ... make LLM calls (no metrics recorded) ...
  * }}}
  *
  * == Expected Output ==
@@ -91,27 +91,32 @@ object PrometheusMetricsExample {
     println("=" * 80)
     println()
 
-    // Start Prometheus HTTP server on port 9090
-    println("Starting Prometheus metrics server...")
-    val metricsResult = PrometheusMetrics.start(port = 9090)
+    // Load metrics configuration
+    println("Loading metrics configuration...")
+    val metricsConfigResult = Llm4sConfig.metrics()
 
-    metricsResult match {
+    metricsConfigResult match {
       case Left(error) =>
-        logger.error("Failed to start metrics server", error)
+        logger.error("Failed to load metrics configuration", error)
         println(s"ERROR: ${error.message}")
-        println("Tip: Make sure port 9090 is available")
         sys.exit(1)
 
-      case Right(metrics) =>
-        println(s"✓ Metrics server started successfully")
-        println(s"✓ Metrics endpoint: ${metrics.getEndpoint.getOrElse("N/A")}")
-        println()
-        println("You can view metrics by running:")
-        println(s"  curl ${metrics.getEndpoint.getOrElse("http://localhost:9090/metrics")}")
-        println()
+      case Right((metrics, endpointOpt)) =>
+        endpointOpt match {
+          case Some(endpoint) =>
+            println(s"✓ Metrics server started successfully")
+            println(s"✓ Metrics endpoint: ${endpoint.url}")
+            println()
+            println("You can view metrics by running:")
+            println(s"  curl ${endpoint.url}")
+            println()
+          case None =>
+            println("✓ Metrics loaded (HTTP server disabled)")
+            println()
+        }
 
         try {
-          // Load configuration
+          // Load provider configuration
           val configResult = Llm4sConfig.provider()
 
           configResult match {
@@ -130,14 +135,15 @@ object PrometheusMetricsExample {
                 case _: org.llm4s.llmconnect.config.AnthropicConfig => "anthropic"
                 case _: org.llm4s.llmconnect.config.OllamaConfig    => "ollama"
                 case _: org.llm4s.llmconnect.config.AzureConfig     => "azure"
+                case _                                              => "unknown"
               }
 
               println(s"Using model: ${config.model}")
               println(s"Provider: $providerName")
               println()
 
-              // Get LLM client
-              LLMConnect.getClient(config) match {
+              // Get LLM client with metrics injection
+              LLMConnect.getClient(config, metrics) match {
                 case Left(error) =>
                   logger.error("Failed to create LLM client", error)
                   println(s"ERROR: ${error.message}")
@@ -226,7 +232,9 @@ object PrometheusMetricsExample {
                   println("  • llm4s_tokens_total - Total tokens consumed (input/output)")
                   println("  • llm4s_request_duration_seconds - Request latency distribution")
                   println()
-                  println(s"View all metrics at: ${metrics.getEndpoint.getOrElse("N/A")}")
+                  endpointOpt.foreach { endpoint =>
+                    println(s"View all metrics at: ${endpoint.url}")
+                  }
                   println()
                   println("Sample metrics output:")
                   println("-" * 80)
@@ -249,11 +257,13 @@ object PrometheusMetricsExample {
           }
 
         } finally {
-          // Clean up: stop metrics server
-          println()
-          println("Stopping metrics server...")
-          metrics.stop()
-          println("✓ Server stopped")
+          // Clean up: stop metrics server if running
+          endpointOpt.foreach { endpoint =>
+            println()
+            println("Stopping metrics server...")
+            endpoint.stop()
+            println("✓ Server stopped")
+          }
         }
     }
 

@@ -22,7 +22,10 @@ import java.util.Optional
 import scala.jdk.CollectionConverters._
 import scala.util.Try
 
-class AnthropicClient(config: AnthropicConfig) extends LLMClient {
+class AnthropicClient(
+  config: AnthropicConfig,
+  private val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
+) extends LLMClient {
   // Store config for budget calculations
   private val providerConfig: ProviderConfig = config
 
@@ -37,8 +40,7 @@ class AnthropicClient(config: AnthropicConfig) extends LLMClient {
     conversation: Conversation,
     options: CompletionOptions
   ): Result[Completion] = {
-    val startTime = System.currentTimeMillis()
-    val metrics   = org.llm4s.metrics.PrometheusMetrics.default
+    val startNanos = System.nanoTime()
 
     // Transform options and messages for model-specific constraints
     val result = TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
@@ -89,16 +91,19 @@ class AnthropicClient(config: AnthropicConfig) extends LLMClient {
     }
 
     // Record metrics
+    val duration = scala.concurrent.duration.FiniteDuration(
+      System.nanoTime() - startNanos,
+      scala.concurrent.duration.NANOSECONDS
+    )
     result match {
       case Right(completion) =>
-        val durationMs = System.currentTimeMillis() - startTime
-        metrics.recordSuccess("anthropic", config.model, durationMs)
+        metrics.observeRequest("anthropic", config.model, org.llm4s.metrics.Outcome.Success, duration)
         completion.usage.foreach { usage =>
-          metrics.recordTokens(usage.promptTokens, usage.completionTokens, "anthropic", config.model)
+          metrics.addTokens("anthropic", config.model, usage.promptTokens.toLong, usage.completionTokens.toLong)
         }
       case Left(error) =>
-        val durationMs = System.currentTimeMillis() - startTime
-        metrics.recordError("anthropic", config.model, error.getClass.getSimpleName, Some(durationMs))
+        val errorKind = org.llm4s.metrics.ErrorKind.fromLLMError(error)
+        metrics.observeRequest("anthropic", config.model, org.llm4s.metrics.Outcome.Error(errorKind), duration)
     }
 
     result
@@ -439,6 +444,6 @@ curl https://api.anthropic.com/v1/messages \
 object AnthropicClient {
   import org.llm4s.types.TryOps
 
-  def apply(config: AnthropicConfig): Result[AnthropicClient] =
-    Try(new AnthropicClient(config)).toResult
+  def apply(config: AnthropicConfig, metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop): Result[AnthropicClient] =
+    Try(new AnthropicClient(config, metrics)).toResult
 }

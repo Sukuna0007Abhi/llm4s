@@ -14,29 +14,34 @@ import java.nio.charset.StandardCharsets
 import java.time.Duration
 import scala.util.Try
 
-class OllamaClient(config: OllamaConfig) extends LLMClient {
+class OllamaClient(
+  config: OllamaConfig,
+  private val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
+) extends LLMClient {
   private val httpClient = HttpClient.newHttpClient()
 
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
   ): Result[Completion] = {
-    val startTime = System.currentTimeMillis()
-    val metrics   = org.llm4s.metrics.PrometheusMetrics.default
+    val startNanos = System.nanoTime()
 
     val result = connect(conversation, options)
 
     // Record metrics
+    val duration = scala.concurrent.duration.FiniteDuration(
+      System.nanoTime() - startNanos,
+      scala.concurrent.duration.NANOSECONDS
+    )
     result match {
       case Right(completion) =>
-        val durationMs = System.currentTimeMillis() - startTime
-        metrics.recordSuccess("ollama", config.model, durationMs)
+        metrics.observeRequest("ollama", config.model, org.llm4s.metrics.Outcome.Success, duration)
         completion.usage.foreach { usage =>
-          metrics.recordTokens(usage.promptTokens, usage.completionTokens, "ollama", config.model)
+          metrics.addTokens("ollama", config.model, usage.promptTokens.toLong, usage.completionTokens.toLong)
         }
       case Left(error) =>
-        val durationMs = System.currentTimeMillis() - startTime
-        metrics.recordError("ollama", config.model, error.getClass.getSimpleName, Some(durationMs))
+        val errorKind = org.llm4s.metrics.ErrorKind.fromLLMError(error)
+        metrics.observeRequest("ollama", config.model, org.llm4s.metrics.Outcome.Error(errorKind), duration)
     }
 
     result
@@ -190,6 +195,6 @@ class OllamaClient(config: OllamaConfig) extends LLMClient {
 object OllamaClient {
   import org.llm4s.types.TryOps
 
-  def apply(config: OllamaConfig): Result[OllamaClient] =
-    Try(new OllamaClient(config)).toResult
+  def apply(config: OllamaConfig, metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop): Result[OllamaClient] =
+    Try(new OllamaClient(config, metrics)).toResult
 }

@@ -17,7 +17,11 @@ import java.io.{ BufferedReader, InputStreamReader }
 import java.nio.charset.StandardCharsets
 import scala.util.Try
 
-class OpenRouterClient(config: OpenAIConfig) extends LLMClient {
+class OpenRouterClient(
+  config: OpenAIConfig,
+  @annotation.nowarn("msg=unused") private val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
+) extends LLMClient {
+  // TODO: Integrate metrics collection (observeRequest, addTokens) like OpenAIClient
   private val httpClient = HttpClient.newHttpClient()
 
   override def complete(
@@ -350,6 +354,6 @@ class OpenRouterClient(config: OpenAIConfig) extends LLMClient {
 object OpenRouterClient {
   import org.llm4s.types.TryOps
 
-  def apply(config: OpenAIConfig): Result[OpenRouterClient] =
-    Try(new OpenRouterClient(config)).toResult
+  def apply(config: OpenAIConfig, metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop): Result[OpenRouterClient] =
+    Try(new OpenRouterClient(config, metrics)).toResult
 }

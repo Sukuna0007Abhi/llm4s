@@ -127,14 +127,7 @@ object ErrorKind {
       case _: org.llm4s.error.AuthenticationError  => Authentication
       case _: org.llm4s.error.NetworkError         => Network
       case _: org.llm4s.error.ValidationError      => Validation
-      case _: org.llm4s.error.InvalidRequestError  => Validation
-      case _: org.llm4s.error.ConfigurationError   => Validation
-      case _: org.llm4s.error.ContentFilterError   => Validation
-      case _: org.llm4s.error.ResourceExhausted    => RateLimit
-      case _: org.llm4s.error.ModelNotFoundError   => Validation
-      case _: org.llm4s.error.InsufficientQuota    => RateLimit
-      case _: org.llm4s.error.ServiceUnavailable   => Network
-      case _: org.llm4s.error.ModelOverloaded      => RateLimit
+      case _: org.llm4s.error.InvalidInputError    => Validation
       case _                                       => Unknown
     }
 }

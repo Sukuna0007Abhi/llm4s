@@ -21,22 +21,26 @@ object LLMConnect {
       case cfg: OllamaConfig =>
         OllamaClient(cfg, metrics)
       case cfg: ZaiConfig =>
-        ZaiClient(cfg)
+        ZaiClient(cfg, metrics)
       case cfg: GeminiConfig =>
-        GeminiClient(cfg)
+        GeminiClient(cfg, metrics)
     }
 
   // Typed-config entry: build client directly from ProviderConfig
   def getClient(
     config: ProviderConfig,
-    metrics: MetricsCollector = MetricsCollector.noop
+    metrics: MetricsCollector
   ): Result[LLMClient] =
     buildClient(config, metrics)
+
+  // Convenience overload with noop metrics default
+  def getClient(config: ProviderConfig): Result[LLMClient] =
+    buildClient(config, MetricsCollector.noop)
 
   def getClient(
     provider: LLMProvider,
     config: ProviderConfig,
-    metrics: MetricsCollector = MetricsCollector.noop
+    metrics: MetricsCollector
   ): Result[LLMClient] =
     (provider, config) match {
       case (LLMProvider.OpenAI, cfg: OpenAIConfig)       => OpenAIClient(cfg, metrics)
@@ -44,8 +48,8 @@ object LLMConnect {
       case (LLMProvider.Azure, cfg: AzureConfig)         => OpenAIClient(cfg, metrics)
       case (LLMProvider.Anthropic, cfg: AnthropicConfig) => AnthropicClient(cfg, metrics)
       case (LLMProvider.Ollama, cfg: OllamaConfig)       => OllamaClient(cfg, metrics)
-      case (LLMProvider.Zai, cfg: ZaiConfig)             => ZaiClient(cfg)
-      case (LLMProvider.Gemini, cfg: GeminiConfig)       => GeminiClient(cfg)
+      case (LLMProvider.Zai, cfg: ZaiConfig)             => ZaiClient(cfg, metrics)
+      case (LLMProvider.Gemini, cfg: GeminiConfig)       => GeminiClient(cfg, metrics)
       case (prov, wrongCfg) =>
         val cfgType = wrongCfg.getClass.getSimpleName
         val msg     = s"Invalid config type $cfgType for provider $prov"

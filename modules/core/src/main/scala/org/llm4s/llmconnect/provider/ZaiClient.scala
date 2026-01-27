@@ -16,7 +16,11 @@ import java.io.{ BufferedReader, InputStreamReader }
 import java.nio.charset.StandardCharsets
 import scala.util.Try
 
-class ZaiClient(config: ZaiConfig) extends LLMClient {
+class ZaiClient(
+  config: ZaiConfig,
+  @annotation.nowarn("msg=unused") private val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
+) extends LLMClient {
+  // TODO: Integrate metrics collection (observeRequest, addTokens) like OpenAIClient
   private val httpClient = HttpClient.newHttpClient()
   private val logger     = org.slf4j.LoggerFactory.getLogger(getClass)
 
@@ -310,6 +314,6 @@ class ZaiClient(config: ZaiConfig) extends LLMClient {
 object ZaiClient {
   import org.llm4s.types.TryOps
 
-  def apply(config: ZaiConfig): Result[ZaiClient] =
-    Try(new ZaiClient(config)).toResult
+  def apply(config: ZaiConfig, metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop): Result[ZaiClient] =
+    Try(new ZaiClient(config, metrics)).toResult
 }

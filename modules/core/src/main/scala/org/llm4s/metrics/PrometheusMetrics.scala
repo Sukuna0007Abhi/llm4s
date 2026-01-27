@@ -30,7 +30,7 @@ import scala.util.Try
  * @param registry Prometheus collector registry
  */
 final class PrometheusMetrics(
-  private[metrics] val registry: CollectorRegistry
+  private[llm4s] val registry: CollectorRegistry
 ) extends MetricsCollector {
 
   private val logger = LoggerFactory.getLogger(getClass)
@@ -49,14 +49,6 @@ final class PrometheusMetrics(
     .name("llm4s_tokens_total")
     .help("Total tokens consumed")
     .labelNames("provider", "model", "type")
-    .register(registry)
-
-  // Cost counter (in USD)
-  private val costUsdTotal = Counter
-    .build()
-    .name("llm4s_cost_usd_total")
-    .help("Total estimated cost in USD")
-    .labelNames("provider", "model")
     .register(registry)
 
   // Error counter

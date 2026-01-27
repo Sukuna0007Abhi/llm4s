@@ -82,7 +82,7 @@ object PrometheusEndpoint {
       
       Right(endpoint)
     } catch {
-      case e: java.net.BindException =>
+      case _: java.net.BindException =>
         Left(ConfigurationError(
           s"Failed to start Prometheus endpoint on port $port: Port already in use. " +
           s"Make sure no other service is using this port."
