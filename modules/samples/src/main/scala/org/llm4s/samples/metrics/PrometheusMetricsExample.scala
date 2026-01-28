@@ -135,7 +135,6 @@ object PrometheusMetricsExample {
                 case _: org.llm4s.llmconnect.config.AnthropicConfig  => "anthropic"
                 case _: org.llm4s.llmconnect.config.OllamaConfig     => "ollama"
                 case _: org.llm4s.llmconnect.config.AzureConfig      => "azure"
-                case _: org.llm4s.llmconnect.config.OpenRouterConfig => "openrouter"
                 case _: org.llm4s.llmconnect.config.ZaiConfig        => "zai"
                 case _: org.llm4s.llmconnect.config.GeminiConfig     => "gemini"
               }

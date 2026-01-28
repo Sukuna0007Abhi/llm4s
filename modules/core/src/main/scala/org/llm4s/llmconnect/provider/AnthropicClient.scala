@@ -10,6 +10,7 @@ import com.anthropic.models.messages.{
 }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ AnthropicConfig, ProviderConfig }
+import org.llm4s.metrics.{ ErrorKind, Outcome }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming._
 import org.llm4s.model.TransformationResult
@@ -97,13 +98,19 @@ class AnthropicClient(
     )
     result match {
       case Right(completion) =>
-        metrics.observeRequest("anthropic", config.model, org.llm4s.metrics.Outcome.Success, duration)
+        metrics.observeRequest("anthropic", config.model, Outcome.Success, duration)
         completion.usage.foreach { usage =>
           metrics.addTokens("anthropic", config.model, usage.promptTokens.toLong, usage.completionTokens.toLong)
+          // Record cost if pricing metadata is available
+          org.llm4s.model.ModelRegistry.lookup(config.model).foreach { meta =>
+            meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens).foreach { cost =>
+              metrics.recordCost("anthropic", config.model, cost)
+            }
+          }
         }
       case Left(error) =>
-        val errorKind = org.llm4s.metrics.ErrorKind.fromLLMError(error)
-        metrics.observeRequest("anthropic", config.model, org.llm4s.metrics.Outcome.Error(errorKind), duration)
+        val errorKind = ErrorKind.fromLLMError(error)
+        metrics.observeRequest("anthropic", config.model, Outcome.Error(errorKind), duration)
     }
 
     result
@@ -304,13 +311,19 @@ curl https://api.anthropic.com/v1/messages \
     )
     result match {
       case Right(completion) =>
-        metrics.observeRequest("anthropic", config.model, org.llm4s.metrics.Outcome.Success, duration)
+        metrics.observeRequest("anthropic", config.model, Outcome.Success, duration)
         completion.usage.foreach { usage =>
           metrics.addTokens("anthropic", config.model, usage.promptTokens.toLong, usage.completionTokens.toLong)
+          // Record cost if pricing metadata is available
+          org.llm4s.model.ModelRegistry.lookup(config.model).foreach { meta =>
+            meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens).foreach { cost =>
+              metrics.recordCost("anthropic", config.model, cost)
+            }
+          }
         }
       case Left(error) =>
-        val errorKind = org.llm4s.metrics.ErrorKind.fromLLMError(error)
-        metrics.observeRequest("anthropic", config.model, org.llm4s.metrics.Outcome.Error(errorKind), duration)
+        val errorKind = ErrorKind.fromLLMError(error)
+        metrics.observeRequest("anthropic", config.model, Outcome.Error(errorKind), duration)
     }
 
     result

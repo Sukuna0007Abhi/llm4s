@@ -69,7 +69,7 @@ final class PrometheusMetrics(
     .name("llm4s_request_duration_seconds")
     .help("Request duration in seconds")
     .labelNames("provider", "model")
-    .classicUpperBounds(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0)
+    .classicUpperBounds(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0)
     .register(registry)
 
   /**

@@ -70,13 +70,19 @@ class OpenRouterClient(
     )
     result match {
       case Right(completion) =>
-        metrics.observeRequest("openrouter", config.model, org.llm4s.metrics.Outcome.Success, duration)
+        metrics.observeRequest("openrouter", config.model, Outcome.Success, duration)
         completion.usage.foreach { usage =>
           metrics.addTokens("openrouter", config.model, usage.promptTokens.toLong, usage.completionTokens.toLong)
+          // Record cost if pricing metadata is available
+          org.llm4s.model.ModelRegistry.lookup(config.model).foreach { meta =>
+            meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens).foreach { cost =>
+              metrics.recordCost("openrouter", config.model, cost)
+            }
+          }
         }
       case Left(error) =>
-        val errorKind = org.llm4s.metrics.ErrorKind.fromLLMError(error)
-        metrics.observeRequest("openrouter", config.model, org.llm4s.metrics.Outcome.Error(errorKind), duration)
+        val errorKind = ErrorKind.fromLLMError(error)
+        metrics.observeRequest("openrouter", config.model, Outcome.Error(errorKind), duration)
     }
 
     result
@@ -153,7 +159,15 @@ class OpenRouterClient(
     result match {
       case Right(completion) =>
         metrics.observeRequest("openrouter", config.model, Outcome.Success, duration)
-        completion.usage.foreach(u => metrics.addTokens("openrouter", config.model, u.promptTokens, u.completionTokens))
+        completion.usage.foreach { u =>
+          metrics.addTokens("openrouter", config.model, u.promptTokens, u.completionTokens)
+          // Record cost if pricing metadata is available
+          org.llm4s.model.ModelRegistry.lookup(config.model).foreach { meta =>
+            meta.pricing.estimateCost(u.promptTokens.toInt, u.completionTokens.toInt).foreach { cost =>
+              metrics.recordCost("openrouter", config.model, cost)
+            }
+          }
+        }
       case Left(error) =>
         metrics.observeRequest("openrouter", config.model, Outcome.Error(ErrorKind.fromLLMError(error)), duration)
     }

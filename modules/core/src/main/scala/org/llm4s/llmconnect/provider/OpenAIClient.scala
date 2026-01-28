@@ -8,6 +8,7 @@ import org.llm4s.error.ConfigurationError
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig, ProviderConfig }
+import org.llm4s.metrics.{ ErrorKind, Outcome }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming._
 import org.llm4s.model.TransformationResult
@@ -131,13 +132,19 @@ class OpenAIClient private (
     )
     result match {
       case Right(completion) =>
-        metrics.observeRequest("openai", model, org.llm4s.metrics.Outcome.Success, duration)
+        metrics.observeRequest("openai", model, Outcome.Success, duration)
         completion.usage.foreach { usage =>
           metrics.addTokens("openai", model, usage.promptTokens.toLong, usage.completionTokens.toLong)
+          // Record cost if pricing metadata is available
+          org.llm4s.model.ModelRegistry.lookup(model).foreach { meta =>
+            meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens).foreach { cost =>
+              metrics.recordCost("openai", model, cost)
+            }
+          }
         }
       case Left(error) =>
-        val errorKind = org.llm4s.metrics.ErrorKind.fromLLMError(error)
-        metrics.observeRequest("openai", model, org.llm4s.metrics.Outcome.Error(errorKind), duration)
+        val errorKind = ErrorKind.fromLLMError(error)
+        metrics.observeRequest("openai", model, Outcome.Error(errorKind), duration)
     }
 
     result
@@ -173,13 +180,19 @@ class OpenAIClient private (
     )
     result match {
       case Right(completion) =>
-        metrics.observeRequest("openai", model, org.llm4s.metrics.Outcome.Success, duration)
+        metrics.observeRequest("openai", model, Outcome.Success, duration)
         completion.usage.foreach { usage =>
           metrics.addTokens("openai", model, usage.promptTokens.toLong, usage.completionTokens.toLong)
+          // Record cost if pricing metadata is available
+          org.llm4s.model.ModelRegistry.lookup(model).foreach { meta =>
+            meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens).foreach { cost =>
+              metrics.recordCost("openai", model, cost)
+            }
+          }
         }
       case Left(error) =>
-        val errorKind = org.llm4s.metrics.ErrorKind.fromLLMError(error)
-        metrics.observeRequest("openai", model, org.llm4s.metrics.Outcome.Error(errorKind), duration)
+        val errorKind = ErrorKind.fromLLMError(error)
+        metrics.observeRequest("openai", model, Outcome.Error(errorKind), duration)
     }
 
     result
@@ -591,9 +604,10 @@ object OpenAIClient {
   private[provider] def forTest(
     model: String,
     transport: OpenAIClientTransport,
-    config: ProviderConfig
+    config: ProviderConfig,
+    metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
   ): OpenAIClient =
-    new OpenAIClient(model, transport, config)
+    new OpenAIClient(model, transport, config, metrics)
 
   /**
    * Creates an OpenAI client for direct OpenAI API access.
