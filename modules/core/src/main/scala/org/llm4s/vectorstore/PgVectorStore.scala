@@ -471,7 +471,12 @@ final class PgVectorStore private (
     else {
       val cleaned = s.stripPrefix("[").stripSuffix("]")
       if (cleaned.isEmpty) Array.empty
-      else cleaned.split(",").map(_.trim.toFloat)
+      else
+        Try(cleaned.split(",").map(_.trim.toFloat)).getOrElse {
+          // Log warning and return empty array for corrupt embeddings
+          System.err.println(s"Warning: Failed to parse embedding string: $s")
+          Array.empty
+        }
     }
 
   private def metadataToJson(metadata: Map[String, String]): String =

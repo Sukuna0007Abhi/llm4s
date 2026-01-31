@@ -353,7 +353,12 @@ final class PgSearchIndex private (
     if (str == null || str.isEmpty) return Array.empty
     val cleaned = str.stripPrefix("[").stripSuffix("]")
     if (cleaned.isEmpty) Array.empty
-    else cleaned.split(",").map(_.trim.toFloat)
+    else
+      Try(cleaned.split(",").map(_.trim.toFloat)).getOrElse {
+        // Log warning and return empty array for corrupt embeddings
+        System.err.println(s"Warning: Failed to parse embedding string: $str")
+        Array.empty
+      }
   }
 
   private def createIntArray(conn: Connection, values: Seq[Int]): SqlArray =
