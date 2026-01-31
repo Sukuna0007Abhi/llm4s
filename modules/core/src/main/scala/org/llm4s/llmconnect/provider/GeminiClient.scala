@@ -9,7 +9,7 @@ import org.llm4s.llmconnect.streaming._
 import org.llm4s.model.TransformationResult
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.types.Result
-import org.llm4s.metrics.{ ErrorKind, MetricsCollector, Outcome }
+import org.llm4s.metrics.{ ErrorKind, Outcome }
 import org.slf4j.LoggerFactory
 
 import java.io.{ BufferedReader, InputStreamReader }
@@ -64,37 +64,38 @@ class GeminiClient(
   ): Result[Completion] = {
     val startNanos = System.nanoTime()
 
-    val result = TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
-      transformed =>
-        val transformedConversation = conversation.copy(messages = transformed.messages)
-        val requestBody             = buildRequestBody(transformedConversation, transformed.options)
-        val url                     = s"${config.baseUrl}/models/${config.model}:generateContent?key=${config.apiKey}"
+    val result =
+      TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
+        transformed =>
+          val transformedConversation = conversation.copy(messages = transformed.messages)
+          val requestBody             = buildRequestBody(transformedConversation, transformed.options)
+          val url                     = s"${config.baseUrl}/models/${config.model}:generateContent?key=${config.apiKey}"
 
-        logger.debug(s"[Gemini] Sending request to ${config.baseUrl}/models/${config.model}:generateContent")
-        logger.debug(s"[Gemini] Request body: ${requestBody.render()}")
+          logger.debug(s"[Gemini] Sending request to ${config.baseUrl}/models/${config.model}:generateContent")
+          logger.debug(s"[Gemini] Request body: ${requestBody.render()}")
 
-        val request = HttpRequest
-          .newBuilder()
-          .uri(URI.create(url))
-          .header("Content-Type", "application/json")
-          .timeout(Duration.ofMinutes(2))
-          .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
-          .build()
+          val request = HttpRequest
+            .newBuilder()
+            .uri(URI.create(url))
+            .header("Content-Type", "application/json")
+            .timeout(Duration.ofMinutes(2))
+            .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
+            .build()
 
-        val attempt = Try {
-          val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+          val attempt = Try {
+            val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
 
-          if (response.statusCode() >= 200 && response.statusCode() < 300) {
-            parseCompletionResponse(response.body())
-          } else {
-            handleErrorResponse(response.statusCode(), response.body())
-          }
-        }.toEither.left
-          .map(e => e.toLLMError)
-          .flatten
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+              parseCompletionResponse(response.body())
+            } else {
+              handleErrorResponse(response.statusCode(), response.body())
+            }
+          }.toEither.left
+            .map(e => e.toLLMError)
+            .flatten
 
-        attempt
-    }
+          attempt
+      }
 
     // Record metrics
     val duration = scala.concurrent.duration.FiniteDuration(

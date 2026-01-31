@@ -16,7 +16,7 @@ import org.slf4j.LoggerFactory
  * {{{
  * val registry = new PrometheusRegistry()
  * val endpointResult = PrometheusEndpoint.start(9090, registry)
- * 
+ *
  * endpointResult match {
  *   case Right(endpoint) =>
  *     println(s"Metrics at: \${endpoint.url}")
@@ -46,7 +46,7 @@ final class PrometheusEndpoint private (
    * Stop the HTTP server.
    * Safe to call multiple times.
    */
-  def stop(): Unit = {
+  def stop(): Unit =
     try {
       logger.info(s"Stopping Prometheus metrics endpoint on port $port")
       server.close()
@@ -54,7 +54,6 @@ final class PrometheusEndpoint private (
       case e: Exception =>
         logger.warn(s"Error stopping Prometheus endpoint: ${e.getMessage}")
     }
-  }
 }
 
 object PrometheusEndpoint {
@@ -71,37 +70,41 @@ object PrometheusEndpoint {
    * @param registry Prometheus collector registry containing metrics
    * @return Right(endpoint) on success, Left(error) if port unavailable or other failure
    */
-  def start(port: Int, registry: PrometheusRegistry): Result[PrometheusEndpoint] = {
+  def start(port: Int, registry: PrometheusRegistry): Result[PrometheusEndpoint] =
     try {
-      val server = HTTPServer.builder()
+      val server = HTTPServer
+        .builder()
         .port(port)
         .registry(registry)
         .buildAndStart()
       // HTTPServer binds immediately, so we can get actual port
       val actualPort = if (port == 0) {
         // When port is 0, OS assigns it - need to get it from the bound server
-        try {
+        try
           server.getPort
-        } catch {
+        catch {
           case _: Exception => port // fallback to requested port if fails
         }
       } else port
-      
+
       val endpoint = new PrometheusEndpoint(server, actualPort)
-      
+
       logger.info(s"Prometheus metrics endpoint started: ${endpoint.url}")
-      
+
       Right(endpoint)
     } catch {
       case _: java.net.BindException =>
-        Left(ConfigurationError(
-          s"Failed to start Prometheus endpoint on port $port: Port already in use. " +
-          s"Make sure no other service is using this port."
-        ))
+        Left(
+          ConfigurationError(
+            s"Failed to start Prometheus endpoint on port $port: Port already in use. " +
+              s"Make sure no other service is using this port."
+          )
+        )
       case e: Exception =>
-        Left(ConfigurationError(
-          s"Failed to start Prometheus endpoint on port $port: ${e.getMessage}"
-        ))
+        Left(
+          ConfigurationError(
+            s"Failed to start Prometheus endpoint on port $port: ${e.getMessage}"
+          )
+        )
     }
-  }
 }

@@ -3,7 +3,7 @@ package org.llm4s.samples.metrics
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
-import org.llm4s.metrics.{MetricsCollector, PrometheusEndpoint}
+// import org.llm4s.metrics.{ MetricsCollector, PrometheusEndpoint }
 import org.slf4j.LoggerFactory
 
 /**
@@ -131,12 +131,12 @@ object PrometheusMetricsExample {
 
             case Right(config) =>
               val providerName = config match {
-                case _: org.llm4s.llmconnect.config.OpenAIConfig     => "openai"
-                case _: org.llm4s.llmconnect.config.AnthropicConfig  => "anthropic"
-                case _: org.llm4s.llmconnect.config.OllamaConfig     => "ollama"
-                case _: org.llm4s.llmconnect.config.AzureConfig      => "azure"
-                case _: org.llm4s.llmconnect.config.ZaiConfig        => "zai"
-                case _: org.llm4s.llmconnect.config.GeminiConfig     => "gemini"
+                case _: org.llm4s.llmconnect.config.OpenAIConfig    => "openai"
+                case _: org.llm4s.llmconnect.config.AnthropicConfig => "anthropic"
+                case _: org.llm4s.llmconnect.config.OllamaConfig    => "ollama"
+                case _: org.llm4s.llmconnect.config.AzureConfig     => "azure"
+                case _: org.llm4s.llmconnect.config.ZaiConfig       => "zai"
+                case _: org.llm4s.llmconnect.config.GeminiConfig    => "gemini"
               }
 
               println(s"Using model: ${config.model}")
@@ -233,31 +233,37 @@ object PrometheusMetricsExample {
                   println("  • llm4s_tokens_total - Total tokens consumed (input/output)")
                   println("  • llm4s_request_duration_seconds - Request latency distribution")
                   println()
-                  endpointOpt.foreach { endpoint =>
-                    println(s"View all metrics at: ${endpoint.url}")
-                  }
+                  endpointOpt.foreach(endpoint => println(s"View all metrics at: ${endpoint.url}"))
                   println()
                   println("Sample metrics output:")
                   println("-" * 80)
                   println("# HELP llm4s_requests_total Total number of LLM requests")
                   println("# TYPE llm4s_requests_total counter")
-                  println(s"llm4s_requests_total{provider=\"$providerName\",model=\"${config.model}\",status=\"success\"} 3.0")
+                  println(
+                    s"llm4s_requests_total{provider=\"$providerName\",model=\"${config.model}\",status=\"success\"} 3.0"
+                  )
                   println()
                   println("# HELP llm4s_tokens_total Total tokens used")
                   println("# TYPE llm4s_tokens_total counter")
-                  println(s"llm4s_tokens_total{provider=\"$providerName\",model=\"${config.model}\",type=\"input\"} X.0")
-                  println(s"llm4s_tokens_total{provider=\"$providerName\",model=\"${config.model}\",type=\"output\"} Y.0")
+                  println(
+                    s"llm4s_tokens_total{provider=\"$providerName\",model=\"${config.model}\",type=\"input\"} X.0"
+                  )
+                  println(
+                    s"llm4s_tokens_total{provider=\"$providerName\",model=\"${config.model}\",type=\"output\"} Y.0"
+                  )
                   println()
                   println("# HELP llm4s_request_duration_seconds Request duration in seconds")
                   println("# TYPE llm4s_request_duration_seconds histogram")
-                  println(s"llm4s_request_duration_seconds_bucket{provider=\"$providerName\",model=\"${config.model}\",le=\"1.0\"} 3.0")
+                  println(
+                    s"llm4s_request_duration_seconds_bucket{provider=\"$providerName\",model=\"${config.model}\",le=\"1.0\"} 3.0"
+                  )
                   println("-" * 80)
                   println()
                   println("✓ Example completed successfully!")
               }
           }
 
-        } finally {
+        } finally
           // Clean up: stop metrics server if running
           endpointOpt.foreach { endpoint =>
             println()
@@ -265,7 +271,6 @@ object PrometheusMetricsExample {
             endpoint.stop()
             println("✓ Server stopped")
           }
-        }
     }
 
     println()

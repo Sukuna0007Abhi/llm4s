@@ -5,7 +5,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
-import org.llm4s.metrics.{ ErrorKind, MetricsCollector, Outcome }
+import org.llm4s.metrics.{ ErrorKind, Outcome }
 import org.llm4s.types.Result
 
 import java.io.{ BufferedReader, InputStreamReader }
@@ -81,7 +81,7 @@ class OllamaClient(
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
-    val startNanos = System.nanoTime()
+    val startNanos  = System.nanoTime()
     val requestBody = createRequestBody(conversation, options, stream = true)
     val request = HttpRequest
       .newBuilder()
@@ -223,6 +223,9 @@ class OllamaClient(
 object OllamaClient {
   import org.llm4s.types.TryOps
 
-  def apply(config: OllamaConfig, metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop): Result[OllamaClient] =
+  def apply(
+    config: OllamaConfig,
+    metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
+  ): Result[OllamaClient] =
     Try(new OllamaClient(config, metrics)).toResult
 }

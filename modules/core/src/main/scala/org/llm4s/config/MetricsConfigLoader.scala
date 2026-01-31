@@ -95,13 +95,11 @@ private[config] object MetricsConfigLoader {
         Right((MetricsCollector.noop, None))
       } else {
         val port = prometheusSection.port.getOrElse(9090)
-        
+
         logger.info(s"Initializing Prometheus metrics on port $port")
-        
+
         val metrics = PrometheusMetrics.create()
-        PrometheusEndpoint.start(port, metrics.registry).map { endpoint =>
-          (metrics, Some(endpoint))
-        }
+        PrometheusEndpoint.start(port, metrics.registry).map(endpoint => (metrics, Some(endpoint)))
       }
     }
   }

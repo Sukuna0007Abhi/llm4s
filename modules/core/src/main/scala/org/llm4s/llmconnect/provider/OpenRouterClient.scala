@@ -9,7 +9,7 @@ import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
 import org.llm4s.error.ThrowableOps._
-import org.llm4s.metrics.{ ErrorKind, MetricsCollector, Outcome }
+import org.llm4s.metrics.{ ErrorKind, Outcome }
 
 import java.net.URI
 import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
@@ -93,7 +93,7 @@ class OpenRouterClient(
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
-    val startNanos = System.nanoTime()
+    val startNanos  = System.nanoTime()
     val requestBody = createRequestBody(conversation, options)
     requestBody("stream") = true
 
@@ -401,6 +401,9 @@ class OpenRouterClient(
 object OpenRouterClient {
   import org.llm4s.types.TryOps
 
-  def apply(config: OpenAIConfig, metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop): Result[OpenRouterClient] =
+  def apply(
+    config: OpenAIConfig,
+    metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
+  ): Result[OpenRouterClient] =
     Try(new OpenRouterClient(config, metrics)).toResult
 }

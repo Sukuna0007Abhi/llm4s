@@ -20,7 +20,7 @@ import scala.util.Try
  * {{{
  * val registry = new PrometheusRegistry()
  * val metrics = new PrometheusMetrics(registry)
- * 
+ *
  * // Use with endpoint
  * PrometheusEndpoint.start(9090, registry).foreach { endpoint =>
  *   // ... use metrics ...
@@ -37,35 +37,40 @@ final class PrometheusMetrics(
   private val logger = LoggerFactory.getLogger(getClass)
 
   // Request counter with labels
-  private val requestsTotal = Counter.builder()
+  private val requestsTotal = Counter
+    .builder()
     .name("llm4s_requests_total")
     .help("Total number of LLM requests")
     .labelNames("provider", "model", "status")
     .register(registry)
 
   // Token counter
-  private val tokensTotal = Counter.builder()
+  private val tokensTotal = Counter
+    .builder()
     .name("llm4s_tokens_total")
     .help("Total tokens consumed")
     .labelNames("provider", "model", "type")
     .register(registry)
 
   // Cost counter
-  private val costUsdTotal = Counter.builder()
+  private val costUsdTotal = Counter
+    .builder()
     .name("llm4s_cost_usd_total")
     .help("Total estimated cost in USD")
     .labelNames("provider", "model")
     .register(registry)
 
   // Error counter
-  private val errorsTotal = Counter.builder()
+  private val errorsTotal = Counter
+    .builder()
     .name("llm4s_errors_total")
     .help("Total number of errors")
     .labelNames("provider", "error_type")
     .register(registry)
 
   // Request duration histogram
-  private val requestDuration = Histogram.builder()
+  private val requestDuration = Histogram
+    .builder()
     .name("llm4s_request_duration_seconds")
     .help("Request duration in seconds")
     .labelNames("provider", "model")
@@ -82,31 +87,29 @@ final class PrometheusMetrics(
     model: String,
     outcome: Outcome,
     duration: FiniteDuration
-  ): Unit = {
+  ): Unit =
     Try {
       val status = outcome match {
-        case Outcome.Success => "success"
+        case Outcome.Success          => "success"
         case Outcome.Error(errorKind) =>
           // Convert PascalCase to snake_case: RateLimit -> rate_limit
-          val kindStr = errorKind.toString
+          val kindStr   = errorKind.toString
           val snakeCase = kindStr.replaceAll("([A-Z])", "_$1").toLowerCase.drop(1)
           s"error_$snakeCase"
       }
-      
+
       requestsTotal.labelValues(provider, model, status).inc()
       requestDuration.labelValues(provider, model).observe(duration.toMillis / 1000.0)
-      
+
       outcome match {
         case Outcome.Error(errorKind) =>
           val errorLabel = errorKind.toString.toLowerCase
           errorsTotal.labelValues(provider, errorLabel).inc()
         case _ => // No additional action for success
       }
-    }.recover {
-      case e: Exception =>
-        logger.warn(s"Failed to record request metrics: ${e.getMessage}")
+    }.recover { case e: Exception =>
+      logger.warn(s"Failed to record request metrics: ${e.getMessage}")
     }
-  }
 
   /**
    * Record token usage.
@@ -118,15 +121,13 @@ final class PrometheusMetrics(
     model: String,
     inputTokens: Long,
     outputTokens: Long
-  ): Unit = {
+  ): Unit =
     Try {
       tokensTotal.labelValues(provider, model, "input").inc(inputTokens.toDouble)
       tokensTotal.labelValues(provider, model, "output").inc(outputTokens.toDouble)
-    }.recover {
-      case e: Exception =>
-        logger.warn(s"Failed to record token metrics: ${e.getMessage}")
+    }.recover { case e: Exception =>
+      logger.warn(s"Failed to record token metrics: ${e.getMessage}")
     }
-  }
 
   /**
    * Record estimated cost in USD.
@@ -137,14 +138,12 @@ final class PrometheusMetrics(
     provider: String,
     model: String,
     costUsd: Double
-  ): Unit = {
+  ): Unit =
     Try {
       costUsdTotal.labelValues(provider, model).inc(costUsd)
-    }.recover {
-      case e: Exception =>
-        logger.warn(s"Failed to record cost metrics: ${e.getMessage}")
+    }.recover { case e: Exception =>
+      logger.warn(s"Failed to record cost metrics: ${e.getMessage}")
     }
-  }
 }
 
 object PrometheusMetrics {

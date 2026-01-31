@@ -106,6 +106,7 @@ object MetricsCollector {
 sealed trait Outcome
 
 object Outcome {
+
   /** Request completed successfully. */
   case object Success extends Outcome
 
@@ -126,12 +127,12 @@ object Outcome {
 sealed trait ErrorKind
 
 object ErrorKind {
-  case object RateLimit extends ErrorKind
-  case object Timeout extends ErrorKind
+  case object RateLimit      extends ErrorKind
+  case object Timeout        extends ErrorKind
   case object Authentication extends ErrorKind
-  case object Network extends ErrorKind
-  case object Validation extends ErrorKind
-  case object Unknown extends ErrorKind
+  case object Network        extends ErrorKind
+  case object Validation     extends ErrorKind
+  case object Unknown        extends ErrorKind
 
   /**
    * Map LLMError to stable ErrorKind.
@@ -141,12 +142,12 @@ object ErrorKind {
    */
   def fromLLMError(error: org.llm4s.error.LLMError): ErrorKind =
     error match {
-      case _: org.llm4s.error.RateLimitError       => RateLimit
-      case _: org.llm4s.error.TimeoutError         => Timeout
-      case _: org.llm4s.error.AuthenticationError  => Authentication
-      case _: org.llm4s.error.NetworkError         => Network
-      case _: org.llm4s.error.ValidationError      => Validation
-      case _: org.llm4s.error.InvalidInputError    => Validation
-      case _                                       => Unknown
+      case _: org.llm4s.error.RateLimitError      => RateLimit
+      case _: org.llm4s.error.TimeoutError        => Timeout
+      case _: org.llm4s.error.AuthenticationError => Authentication
+      case _: org.llm4s.error.NetworkError        => Network
+      case _: org.llm4s.error.ValidationError     => Validation
+      case _: org.llm4s.error.InvalidInputError   => Validation
+      case _                                      => Unknown
     }
 }
