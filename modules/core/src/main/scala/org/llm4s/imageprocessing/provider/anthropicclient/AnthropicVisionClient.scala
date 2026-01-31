@@ -173,9 +173,10 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
     mediaType: MediaType
   ): Try[String] =
     Try {
-      import sttp.client4._
+      import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
+      import java.net.URI
+      import java.time.Duration
       import ujson._
-      import scala.concurrent.duration._
 
       // Use type-safe serialization
       val requestBody = AnthropicRequestBody.serialize(
@@ -186,47 +187,41 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
         mediaType = mediaType
       )
 
-      val backend = DefaultSyncBackend(
-        options = BackendOptions.Default.connectionTimeout(config.connectTimeoutSeconds.seconds)
-      )
+      val httpClient = HttpClient
+        .newBuilder()
+        .connectTimeout(Duration.ofSeconds(config.connectTimeoutSeconds))
+        .build()
 
-      val request = basicRequest
-        .post(uri"${config.baseUrl}/v1/messages")
+      val request = HttpRequest
+        .newBuilder()
+        .uri(URI.create(s"${config.baseUrl}/v1/messages"))
+        .timeout(Duration.ofSeconds(config.connectTimeoutSeconds + config.requestTimeoutSeconds))
         .header("Content-Type", "application/json")
         .header("x-api-key", config.apiKey)
         .header("anthropic-version", "2023-06-01")
-        .body(requestBody)
-        .readTimeout(config.requestTimeoutSeconds.seconds)
+        .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+        .build()
 
-      val response = request.send(backend)
-      backend.close()
+      val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
 
-      response.code.code match {
+      response.statusCode() match {
         case 200 =>
-          response.body match {
-            case Right(responseBody) =>
-              extractContentFromResponse(responseBody)
-            case Left(errorBody) =>
-              throw new RuntimeException(s"Unexpected error parsing successful response: $errorBody")
-          }
+          extractContentFromResponse(response.body())
         case statusCode =>
-          val errorMessage = response.body match {
-            case Left(errorBody) =>
-              Try(read(errorBody)).toOption
-                .flatMap(js => js.obj.get("error"))
-                .map { err =>
-                  val message   = err.obj.get("message").flatMap(_.strOpt)
-                  val errorType = err.obj.get("type").flatMap(_.strOpt)
-                  (message, errorType) match {
-                    case (Some(msg), Some(typ)) => s"$typ: $msg"
-                    case (Some(msg), None)      => msg
-                    case _                      => errorBody
-                  }
-                }
-                .map(d => s"Status $statusCode: $d")
-                .getOrElse(s"Status $statusCode: $errorBody")
-            case Right(body) => s"Status $statusCode: $body"
-          }
+          val errorBody = response.body()
+          val errorMessage = Try(read(errorBody)).toOption
+            .flatMap(js => js.obj.get("error"))
+            .map { err =>
+              val message   = err.obj.get("message").flatMap(_.strOpt)
+              val errorType = err.obj.get("type").flatMap(_.strOpt)
+              (message, errorType) match {
+                case (Some(msg), Some(typ)) => s"$typ: $msg"
+                case (Some(msg), None)      => msg
+                case _                      => errorBody
+              }
+            }
+            .map(d => s"Status $statusCode: $d")
+            .getOrElse(s"Status $statusCode: $errorBody")
           throw new RuntimeException(s"Anthropic API call failed - $errorMessage")
       }
     }

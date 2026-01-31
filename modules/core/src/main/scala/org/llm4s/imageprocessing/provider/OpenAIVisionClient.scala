@@ -155,9 +155,10 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
 
   private def callOpenAIVisionAPI(base64Image: String, prompt: String, mediaType: MediaType): Try[String] =
     Try {
-      import sttp.client4._
+      import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
+      import java.net.URI
+      import java.time.Duration
       import ujson._
-      import scala.concurrent.duration._
 
       // Use type-safe serialization
       val requestBody = OpenAIRequestBody.serialize(
@@ -168,48 +169,42 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
         mediaType = mediaType
       )
 
-      val backend = DefaultSyncBackend(
-        options = BackendOptions.Default.connectionTimeout(config.connectTimeoutSeconds.seconds)
-      )
+      val httpClient = HttpClient
+        .newBuilder()
+        .connectTimeout(Duration.ofSeconds(config.connectTimeoutSeconds))
+        .build()
 
-      val request = basicRequest
-        .post(uri"${config.baseUrl}/chat/completions")
+      val request = HttpRequest
+        .newBuilder()
+        .uri(URI.create(s"${config.baseUrl}/chat/completions"))
+        .timeout(Duration.ofSeconds(config.connectTimeoutSeconds + config.requestTimeoutSeconds))
         .header("Content-Type", "application/json")
         .header("Authorization", s"Bearer ${config.apiKey}")
-        .body(requestBody)
-        .readTimeout(config.requestTimeoutSeconds.seconds)
+        .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+        .build()
 
-      val response = request.send(backend)
-      backend.close()
+      val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
 
-      response.code.code match {
+      response.statusCode() match {
         case 200 =>
-          response.body match {
-            case Right(responseBody) =>
-              extractContentFromResponse(responseBody)
-            case Left(errorBody) =>
-              throw new RuntimeException(s"Unexpected error parsing successful response: $errorBody")
-          }
+          extractContentFromResponse(response.body())
         case statusCode =>
-          val errorMessage = response.body match {
-            case Left(errorBody) =>
-              Try(read(errorBody)).toOption
-                .flatMap(js => js.obj.get("error"))
-                .map { err =>
-                  val message   = err.obj.get("message").flatMap(_.strOpt)
-                  val errorType = err.obj.get("type").flatMap(_.strOpt)
-                  val errorCode = err.obj.get("code").flatMap(_.strOpt)
-                  (message, errorType, errorCode) match {
-                    case (Some(msg), _, Some(code)) => s"$code: $msg"
-                    case (Some(msg), Some(typ), _)  => s"$typ: $msg"
-                    case (Some(msg), _, _)          => msg
-                    case _                          => errorBody
-                  }
-                }
-                .map(d => s"Status $statusCode: $d")
-                .getOrElse(s"Status $statusCode: $errorBody")
-            case Right(body) => s"Status $statusCode: $body"
-          }
+          val errorBody = response.body()
+          val errorMessage = Try(read(errorBody)).toOption
+            .flatMap(js => js.obj.get("error"))
+            .map { err =>
+              val message   = err.obj.get("message").flatMap(_.strOpt)
+              val errorType = err.obj.get("type").flatMap(_.strOpt)
+              val errorCode = err.obj.get("code").flatMap(_.strOpt)
+              (message, errorType, errorCode) match {
+                case (Some(msg), _, Some(code)) => s"$code: $msg"
+                case (Some(msg), Some(typ), _)  => s"$typ: $msg"
+                case (Some(msg), _, _)          => msg
+                case _                          => errorBody
+              }
+            }
+            .map(d => s"Status $statusCode: $d")
+            .getOrElse(s"Status $statusCode: $errorBody")
           throw new RuntimeException(s"OpenAI API call failed - $errorMessage")
       }
     }
