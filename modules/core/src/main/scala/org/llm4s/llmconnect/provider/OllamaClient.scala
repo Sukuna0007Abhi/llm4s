@@ -78,49 +78,48 @@ class OllamaClient(
         case 429 => Left(RateLimitError("ollama"))
         case s   => Left(ServiceError(s, "ollama", s"Ollama error: $err"))
       }
-    }
+    } else {
+      val accumulator = StreamingAccumulator.create()
+      val reader      = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
+      val processEither = Try {
+        try {
+          var line: String = null
+          while ({ line = reader.readLine(); line != null }) {
+            val trimmed = line.trim
+            if (trimmed.nonEmpty) {
+              val json = ujson.read(trimmed)
+              // Ollama streams incremental content in json lines
+              val done = json.obj.get("done").exists(_.bool)
+              val contentOpt = json.obj
+                .get("message")
+                .flatMap(_.obj.get("content"))
+                .flatMap(_.strOpt)
+                .filter(_.nonEmpty)
 
-    val accumulator = StreamingAccumulator.create()
-    val reader      = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
-    val processEither = Try {
-      try {
-        var line: String = null
-        while ({ line = reader.readLine(); line != null }) {
-          val trimmed = line.trim
-          if (trimmed.nonEmpty) {
-            val json = ujson.read(trimmed)
-            // Ollama streams incremental content in json lines
-            val done = json.obj.get("done").exists(_.bool)
-            val contentOpt = json.obj
-              .get("message")
-              .flatMap(_.obj.get("content"))
-              .flatMap(_.strOpt)
-              .filter(_.nonEmpty)
+              val chunk = StreamedChunk(
+                id = json.obj.get("id").flatMap(_.strOpt).getOrElse(""),
+                content = contentOpt,
+                toolCall = None,
+                finishReason = if (done) Some("stop") else None
+              )
 
-            val chunk = StreamedChunk(
-              id = json.obj.get("id").flatMap(_.strOpt).getOrElse(""),
-              content = contentOpt,
-              toolCall = None,
-              finishReason = if (done) Some("stop") else None
-            )
+              accumulator.addChunk(chunk)
+              onChunk(chunk)
 
-            accumulator.addChunk(chunk)
-            onChunk(chunk)
-
-            // token counts (if present) only appear at the end
-            if (done) {
-              val prompt = json.obj.get("prompt_eval_count").flatMap(_.numOpt).map(_.toInt).getOrElse(0)
-              val comp   = json.obj.get("eval_count").flatMap(_.numOpt).map(_.toInt).getOrElse(0)
-              if (prompt > 0 || comp > 0) accumulator.updateTokens(prompt, comp)
+              // token counts (if present) only appear at the end
+              if (done) {
+                val prompt = json.obj.get("prompt_eval_count").flatMap(_.numOpt).map(_.toInt).getOrElse(0)
+                val comp   = json.obj.get("eval_count").flatMap(_.numOpt).map(_.toInt).getOrElse(0)
+                if (prompt > 0 || comp > 0) accumulator.updateTokens(prompt, comp)
+              }
             }
           }
+        } finally {
+          Try(reader.close())
+          Try(response.body().close())
         }
-      } finally {
-        Try(reader.close())
-        Try(response.body().close())
-      }
-    }.toEither
-    processEither.left.foreach(_ => ())
+      }.toEither
+      processEither.left.foreach(_ => ())
 
       accumulator.toCompletion
     }
