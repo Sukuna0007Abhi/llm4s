@@ -78,10 +78,12 @@ class OllamaClient(
         case 429 => Left(RateLimitError("ollama"))
         case s   => Left(ServiceError(s, "ollama", s"Ollama error: $err"))
       }
-    } else {
-      val accumulator = StreamingAccumulator.create()
-      val reader      = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
-      val processEither = Try {
+    }
+
+    val accumulator = StreamingAccumulator.create()
+    val reader      = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
+    val processEither = Try {
+      try {
         var line: String = null
         while ({ line = reader.readLine(); line != null }) {
           val trimmed = line.trim
@@ -113,11 +115,12 @@ class OllamaClient(
             }
           }
         }
-      }.toEither
-      // close resources regardless
-      Try(reader.close())
-      Try(response.body().close())
-      processEither.left.foreach(_ => ())
+      } finally {
+        Try(reader.close())
+        Try(response.body().close())
+      }
+    }.toEither
+    processEither.left.foreach(_ => ())
 
       accumulator.toCompletion
     }
