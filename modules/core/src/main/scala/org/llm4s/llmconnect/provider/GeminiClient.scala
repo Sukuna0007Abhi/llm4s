@@ -9,7 +9,6 @@ import org.llm4s.llmconnect.streaming._
 import org.llm4s.model.TransformationResult
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.types.Result
-import org.llm4s.metrics.{ ErrorKind, Outcome }
 import org.slf4j.LoggerFactory
 
 import java.io.{ BufferedReader, InputStreamReader }
@@ -17,7 +16,6 @@ import java.net.URI
 import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.nio.charset.StandardCharsets
 import java.time.Duration
-import scala.concurrent.duration.{ FiniteDuration, NANOSECONDS }
 import java.util.UUID
 import scala.util.Try
 
@@ -53,81 +51,60 @@ import scala.util.Try
  */
 class GeminiClient(
   config: GeminiConfig,
-  private val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-) extends LLMClient {
+  protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
+) extends LLMClient
+    with MetricsRecording {
   private val logger     = LoggerFactory.getLogger(getClass)
   private val httpClient = HttpClient.newHttpClient()
 
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = {
-    val startNanos = System.nanoTime()
+  ): Result[Completion] = withMetrics("gemini", config.model) {
+    TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
+      transformed =>
+        val transformedConversation = conversation.copy(messages = transformed.messages)
+        val requestBody             = buildRequestBody(transformedConversation, transformed.options)
+        val url                     = s"${config.baseUrl}/models/${config.model}:generateContent?key=${config.apiKey}"
 
-    val result =
-      TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
-        transformed =>
-          val transformedConversation = conversation.copy(messages = transformed.messages)
-          val requestBody             = buildRequestBody(transformedConversation, transformed.options)
-          val url                     = s"${config.baseUrl}/models/${config.model}:generateContent?key=${config.apiKey}"
+        logger.debug(s"[Gemini] Sending request to ${config.baseUrl}/models/${config.model}:generateContent")
+        logger.debug(s"[Gemini] Request body: ${requestBody.render()}")
 
-          logger.debug(s"[Gemini] Sending request to ${config.baseUrl}/models/${config.model}:generateContent")
-          logger.debug(s"[Gemini] Request body: ${requestBody.render()}")
+        val request = HttpRequest
+          .newBuilder()
+          .uri(URI.create(url))
+          .header("Content-Type", "application/json")
+          .timeout(Duration.ofMinutes(2))
+          .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
+          .build()
 
-          val request = HttpRequest
-            .newBuilder()
-            .uri(URI.create(url))
-            .header("Content-Type", "application/json")
-            .timeout(Duration.ofMinutes(2))
-            .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
-            .build()
+        val attempt = Try {
+          val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
 
-          val attempt = Try {
-            val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
-
-            if (response.statusCode() >= 200 && response.statusCode() < 300) {
-              parseCompletionResponse(response.body())
-            } else {
-              handleErrorResponse(response.statusCode(), response.body())
-            }
-          }.toEither.left
-            .map(e => e.toLLMError)
-            .flatten
-
-          attempt
-      }
-
-    // Record metrics
-    val duration = scala.concurrent.duration.FiniteDuration(
-      System.nanoTime() - startNanos,
-      scala.concurrent.duration.NANOSECONDS
-    )
-    result match {
-      case Right(completion) =>
-        metrics.observeRequest("gemini", config.model, Outcome.Success, duration)
-        completion.usage.foreach { usage =>
-          metrics.addTokens("gemini", config.model, usage.promptTokens.toLong, usage.completionTokens.toLong)
-          // Record cost if pricing metadata is available
-          org.llm4s.model.ModelRegistry.lookup(config.model).foreach { meta =>
-            meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens).foreach { cost =>
-              metrics.recordCost("gemini", config.model, cost)
-            }
+          if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            parseCompletionResponse(response.body())
+          } else {
+            handleErrorResponse(response.statusCode(), response.body())
           }
-        }
-      case Left(error) =>
-        val errorKind = ErrorKind.fromLLMError(error)
-        metrics.observeRequest("gemini", config.model, Outcome.Error(errorKind), duration)
-    }
+        }.toEither.left
+          .map(e => e.toLLMError)
+          .flatten
 
-    result
-  }
+        attempt
+    }
+  }(
+    extractUsage = _.usage,
+    estimateCost = usage =>
+      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
+        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
+      }
+  )
 
   override def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = {
-    val startNanos = System.nanoTime()
+  ): Result[Completion] = withMetrics("gemini", config.model) {
     TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
       transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
@@ -178,31 +155,18 @@ class GeminiClient(
           Try(reader.close())
           Try(response.body().close())
 
-          val result = processEither.left
+          processEither.left
             .map(_.toLLMError)
             .flatMap(_ => accumulator.toCompletion.map(c => c.copy(model = config.model)))
-
-          // Record metrics
-          val duration = FiniteDuration(System.nanoTime() - startNanos, NANOSECONDS)
-          result match {
-            case Right(completion) =>
-              metrics.observeRequest("gemini", config.model, Outcome.Success, duration)
-              completion.usage.foreach { u =>
-                metrics.addTokens("gemini", config.model, u.promptTokens, u.completionTokens)
-                // Record cost if pricing metadata is available
-                org.llm4s.model.ModelRegistry.lookup(config.model).foreach { meta =>
-                  meta.pricing.estimateCost(u.promptTokens.toInt, u.completionTokens.toInt).foreach { cost =>
-                    metrics.recordCost("gemini", config.model, cost)
-                  }
-                }
-              }
-            case Left(error) =>
-              metrics.observeRequest("gemini", config.model, Outcome.Error(ErrorKind.fromLLMError(error)), duration)
-          }
-          result
         }
     }
-  }
+  }(
+    extractUsage = _.usage,
+    estimateCost = usage =>
+      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
+        meta.pricing.estimateCost(usage.promptTokens.toInt, usage.completionTokens.toInt)
+      }
+  )
 
   override def getContextWindow(): Int = config.contextWindow
 

@@ -5,7 +5,6 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
-import org.llm4s.metrics.{ ErrorKind, Outcome }
 import org.llm4s.types.Result
 
 import java.io.{ BufferedReader, InputStreamReader }
@@ -13,47 +12,27 @@ import java.net.URI
 import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.nio.charset.StandardCharsets
 import java.time.Duration
-import scala.concurrent.duration.{ FiniteDuration, NANOSECONDS }
 import scala.util.Try
 
 class OllamaClient(
   config: OllamaConfig,
-  private val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-) extends LLMClient {
+  protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
+) extends LLMClient
+    with MetricsRecording {
   private val httpClient = HttpClient.newHttpClient()
 
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = {
-    val startNanos = System.nanoTime()
-
-    val result = connect(conversation, options)
-
-    // Record metrics
-    val duration = scala.concurrent.duration.FiniteDuration(
-      System.nanoTime() - startNanos,
-      scala.concurrent.duration.NANOSECONDS
-    )
-    result match {
-      case Right(completion) =>
-        metrics.observeRequest("ollama", config.model, Outcome.Success, duration)
-        completion.usage.foreach { usage =>
-          metrics.addTokens("ollama", config.model, usage.promptTokens.toLong, usage.completionTokens.toLong)
-          // Record cost if pricing metadata is available
-          org.llm4s.model.ModelRegistry.lookup(config.model).foreach { meta =>
-            meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens).foreach { cost =>
-              metrics.recordCost("ollama", config.model, cost)
-            }
-          }
-        }
-      case Left(error) =>
-        val errorKind = ErrorKind.fromLLMError(error)
-        metrics.observeRequest("ollama", config.model, Outcome.Error(errorKind), duration)
-    }
-
-    result
-  }
+  ): Result[Completion] = withMetrics("ollama", config.model) {
+    connect(conversation, options)
+  }(
+    extractUsage = _.usage,
+    estimateCost = usage =>
+      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
+        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
+      }
+  )
 
   private def connect(conversation: Conversation, options: CompletionOptions) = {
     val requestBody = createRequestBody(conversation, options, stream = false)
@@ -80,8 +59,7 @@ class OllamaClient(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = {
-    val startNanos  = System.nanoTime()
+  ): Result[Completion] = withMetrics("ollama", config.model) {
     val requestBody = createRequestBody(conversation, options, stream = true)
     val request = HttpRequest
       .newBuilder()
@@ -95,74 +73,61 @@ class OllamaClient(
     if (response.statusCode() != 200) {
       val err = new String(response.body().readAllBytes(), StandardCharsets.UTF_8)
       response.body().close()
-      return response.statusCode() match {
+      response.statusCode() match {
         case 401 => Left(AuthenticationError("ollama", "Unauthorized"))
         case 429 => Left(RateLimitError("ollama"))
         case s   => Left(ServiceError(s, "ollama", s"Ollama error: $err"))
       }
-    }
+    } else {
+      val accumulator = StreamingAccumulator.create()
+      val reader      = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
+      val processEither = Try {
+        var line: String = null
+        while ({ line = reader.readLine(); line != null }) {
+          val trimmed = line.trim
+          if (trimmed.nonEmpty) {
+            val json = ujson.read(trimmed)
+            // Ollama streams incremental content in json lines
+            val done = json.obj.get("done").exists(_.bool)
+            val contentOpt = json.obj
+              .get("message")
+              .flatMap(_.obj.get("content"))
+              .flatMap(_.strOpt)
+              .filter(_.nonEmpty)
 
-    val accumulator = StreamingAccumulator.create()
-    val reader      = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
-    val processEither = Try {
-      var line: String = null
-      while ({ line = reader.readLine(); line != null }) {
-        val trimmed = line.trim
-        if (trimmed.nonEmpty) {
-          val json = ujson.read(trimmed)
-          // Ollama streams incremental content in json lines
-          val done = json.obj.get("done").exists(_.bool)
-          val contentOpt = json.obj
-            .get("message")
-            .flatMap(_.obj.get("content"))
-            .flatMap(_.strOpt)
-            .filter(_.nonEmpty)
+            val chunk = StreamedChunk(
+              id = json.obj.get("id").flatMap(_.strOpt).getOrElse(""),
+              content = contentOpt,
+              toolCall = None,
+              finishReason = if (done) Some("stop") else None
+            )
 
-          val chunk = StreamedChunk(
-            id = json.obj.get("id").flatMap(_.strOpt).getOrElse(""),
-            content = contentOpt,
-            toolCall = None,
-            finishReason = if (done) Some("stop") else None
-          )
+            accumulator.addChunk(chunk)
+            onChunk(chunk)
 
-          accumulator.addChunk(chunk)
-          onChunk(chunk)
-
-          // token counts (if present) only appear at the end
-          if (done) {
-            val prompt = json.obj.get("prompt_eval_count").flatMap(_.numOpt).map(_.toInt).getOrElse(0)
-            val comp   = json.obj.get("eval_count").flatMap(_.numOpt).map(_.toInt).getOrElse(0)
-            if (prompt > 0 || comp > 0) accumulator.updateTokens(prompt, comp)
-          }
-        }
-      }
-    }.toEither
-    // close resources regardless
-    Try(reader.close())
-    Try(response.body().close())
-    processEither.left.foreach(_ => ())
-
-    val result = accumulator.toCompletion
-
-    // Record metrics
-    val duration = FiniteDuration(System.nanoTime() - startNanos, NANOSECONDS)
-    result match {
-      case Right(completion) =>
-        metrics.observeRequest("ollama", config.model, Outcome.Success, duration)
-        completion.usage.foreach { u =>
-          metrics.addTokens("ollama", config.model, u.promptTokens, u.completionTokens)
-          // Record cost if pricing metadata is available
-          org.llm4s.model.ModelRegistry.lookup(config.model).foreach { meta =>
-            meta.pricing.estimateCost(u.promptTokens.toInt, u.completionTokens.toInt).foreach { cost =>
-              metrics.recordCost("ollama", config.model, cost)
+            // token counts (if present) only appear at the end
+            if (done) {
+              val prompt = json.obj.get("prompt_eval_count").flatMap(_.numOpt).map(_.toInt).getOrElse(0)
+              val comp   = json.obj.get("eval_count").flatMap(_.numOpt).map(_.toInt).getOrElse(0)
+              if (prompt > 0 || comp > 0) accumulator.updateTokens(prompt, comp)
             }
           }
         }
-      case Left(error) =>
-        metrics.observeRequest("ollama", config.model, Outcome.Error(ErrorKind.fromLLMError(error)), duration)
+      }.toEither
+      // close resources regardless
+      Try(reader.close())
+      Try(response.body().close())
+      processEither.left.foreach(_ => ())
+
+      accumulator.toCompletion
     }
-    result
-  }
+  }(
+    extractUsage = _.usage,
+    estimateCost = usage =>
+      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
+        meta.pricing.estimateCost(usage.promptTokens.toInt, usage.completionTokens.toInt)
+      }
+  )
 
   private def createRequestBody(
     conversation: Conversation,

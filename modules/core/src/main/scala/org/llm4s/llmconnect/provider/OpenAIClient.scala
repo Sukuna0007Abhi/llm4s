@@ -8,7 +8,6 @@ import org.llm4s.error.ConfigurationError
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig, ProviderConfig }
-import org.llm4s.metrics.{ ErrorKind, Outcome }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming._
 import org.llm4s.model.TransformationResult
@@ -53,8 +52,9 @@ class OpenAIClient private (
   private val model: String,
   private val transport: OpenAIClientTransport,
   private val config: ProviderConfig,
-  private val metrics: org.llm4s.metrics.MetricsCollector
-) extends LLMClient {
+  protected val metrics: org.llm4s.metrics.MetricsCollector
+) extends LLMClient
+    with MetricsRecording {
 
   private lazy val logger: Logger   = LoggerFactory.getLogger(getClass)
   private val closed: AtomicBoolean = new AtomicBoolean(false)
@@ -99,10 +99,8 @@ class OpenAIClient private (
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = {
-    val startNanos = System.nanoTime()
-
-    val result = validateNotClosed.flatMap { _ =>
+  ): Result[Completion] = withMetrics("openai", model) {
+    validateNotClosed.flatMap { _ =>
       // Transform options and messages for model-specific constraints
       for {
         transformed <- TransformationResult.transform(
@@ -124,40 +122,20 @@ class OpenAIClient private (
           }
       } yield convertFromOpenAIFormat(completions)
     }
-
-    // Record metrics
-    val duration = scala.concurrent.duration.FiniteDuration(
-      System.nanoTime() - startNanos,
-      scala.concurrent.duration.NANOSECONDS
-    )
-    result match {
-      case Right(completion) =>
-        metrics.observeRequest("openai", model, Outcome.Success, duration)
-        completion.usage.foreach { usage =>
-          metrics.addTokens("openai", model, usage.promptTokens.toLong, usage.completionTokens.toLong)
-          // Record cost if pricing metadata is available
-          org.llm4s.model.ModelRegistry.lookup(model).foreach { meta =>
-            meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens).foreach { cost =>
-              metrics.recordCost("openai", model, cost)
-            }
-          }
-        }
-      case Left(error) =>
-        val errorKind = ErrorKind.fromLLMError(error)
-        metrics.observeRequest("openai", model, Outcome.Error(errorKind), duration)
-    }
-
-    result
-  }
+  }(
+    extractUsage = _.usage,
+    estimateCost = usage =>
+      org.llm4s.model.ModelRegistry.lookup(model).toOption.flatMap { meta =>
+        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
+      }
+  )
 
   override def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = {
-    val startNanos = System.nanoTime()
-
-    val result = validateNotClosed.flatMap { _ =>
+  ): Result[Completion] = withMetrics("openai", model) {
+    validateNotClosed.flatMap { _ =>
       // Transform options and messages for model-specific constraints
       TransformationResult.transform(model, options, conversation.messages, dropUnsupported = true).flatMap {
         transformed =>
@@ -172,31 +150,13 @@ class OpenAIClient private (
           }
       }
     }
-
-    // Record metrics
-    val duration = scala.concurrent.duration.FiniteDuration(
-      System.nanoTime() - startNanos,
-      scala.concurrent.duration.NANOSECONDS
-    )
-    result match {
-      case Right(completion) =>
-        metrics.observeRequest("openai", model, Outcome.Success, duration)
-        completion.usage.foreach { usage =>
-          metrics.addTokens("openai", model, usage.promptTokens.toLong, usage.completionTokens.toLong)
-          // Record cost if pricing metadata is available
-          org.llm4s.model.ModelRegistry.lookup(model).foreach { meta =>
-            meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens).foreach { cost =>
-              metrics.recordCost("openai", model, cost)
-            }
-          }
-        }
-      case Left(error) =>
-        val errorKind = ErrorKind.fromLLMError(error)
-        metrics.observeRequest("openai", model, Outcome.Error(errorKind), duration)
-    }
-
-    result
-  }
+  }(
+    extractUsage = _.usage,
+    estimateCost = usage =>
+      org.llm4s.model.ModelRegistry.lookup(model).toOption.flatMap { meta =>
+        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
+      }
+  )
 
   override def close(): Unit =
     // Mark client as closed to prevent further operations.
