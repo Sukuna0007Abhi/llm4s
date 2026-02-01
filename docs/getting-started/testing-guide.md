@@ -82,6 +82,13 @@ class WeatherAgentSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  // Example agent that uses the LLM client
+  class WeatherAgent(client: LLMClient) {
+    def run(query: String): Result[Completion] = {
+      client.complete(Conversation(Seq(UserMessage(query))))
+    }
+  }
+
   "WeatherAgent" should "extract city from user query" in {
     val agent = new WeatherAgent(new MockLLMClient)
     val result = agent.run("What's the weather in London?")
@@ -369,7 +376,9 @@ class ErrorHandlingSpec extends AnyFlatSpec with Matchers {
 
 ## Testing Tool Calling
 
-Test that tools are invoked correctly:
+Test that tools are invoked correctly.
+
+> **Note**: This example uses simplified Tool API for clarity. In production, use `ToolBuilder` and `ToolFunction` from `org.llm4s.agent.tool` package. See the [Tools documentation](../agents/tools.md) for actual API.
 
 ```scala
 class ToolCallingSpec extends AnyFlatSpec with Matchers {
@@ -378,6 +387,7 @@ class ToolCallingSpec extends AnyFlatSpec with Matchers {
     var toolWasCalled = false
     var capturedCity: Option[String] = None
 
+    // Simplified tool example for testing concepts
     val weatherTool = new Tool {
       override def name: String = "get_weather"
       override def description: String = "Get weather for a city"
@@ -448,9 +458,10 @@ class RAGSpec extends AnyFlatSpec with Matchers {
       "Java runs on the JVM"
     )
 
-    // Test retrieval without LLM
-    val vectorStore = new InMemoryVectorStore()
-    documents.foreach(doc => vectorStore.add(doc, embedder.embed(doc)))
+    // Note: This is conceptual pseudocode showing testing patterns.
+    // Use actual VectorStore implementations from org.llm4s.llmconnect.vectorstore package
+    val vectorStore = new InMemoryVectorStore()  // Example - use actual implementation
+    documents.foreach(doc => vectorStore.add(doc, embedder.embed(doc)))  // embedder is conceptual
 
     val results = vectorStore.search("functional programming", topK = 1)
     

@@ -212,6 +212,7 @@ For real-time output, use streaming:
 ```scala
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
+import org.llm4s.config.Llm4sConfig
 
 object StreamingExample extends App {
   val result = for {
@@ -431,7 +432,7 @@ clientResult match {
   case Right(client) =>
     // Reuse for multiple requests
     (1 to 10).foreach { i =>
-      client.complete(List(UserMessage(s"Question $i")), None)
+      client.complete(Conversation(Seq(UserMessage(s"Question $i"))))
     }
   case Left(error) => println(s"Error: $error")
 }
