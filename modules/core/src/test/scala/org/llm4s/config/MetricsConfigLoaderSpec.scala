@@ -29,7 +29,7 @@ class MetricsConfigLoaderSpec extends AnyFunSuite {
         enabled = true
         prometheus {
           enabled = true
-          port = 9999
+          port = 0
         }
       }
     """)
@@ -40,6 +40,8 @@ class MetricsConfigLoaderSpec extends AnyFunSuite {
     result.foreach { case (collector, endpoint) =>
       assert(collector != null)
       assert(endpoint.isDefined)
+      // Clean up endpoint to release port
+      endpoint.foreach(_.stop())
     }
   }
 
