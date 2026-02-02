@@ -369,8 +369,7 @@ for {
   providerConfig <- Llm4sConfig.provider()
   client <- LLMConnect.getClient(providerConfig)
   response <- client.complete(
-    List(UserMessage("Your question here")),
-    None
+    Conversation(Seq(UserMessage("Your question here")))
   )
 } yield response.content
 ```
@@ -382,11 +381,10 @@ for {
   providerConfig <- Llm4sConfig.provider()
   client <- LLMConnect.getClient(providerConfig)
   response <- client.complete(
-    List(
+    Conversation(Seq(
       SystemMessage("You are an expert in..."),
       UserMessage("Question")
-    ),
-    None
+    ))
   )
 } yield response.content
 ```
@@ -409,8 +407,12 @@ for {
 for {
   providerConfig <- Llm4sConfig.provider()
   client <- LLMConnect.getClient(providerConfig)
-  stream <- client.completeStreaming(messages, None)
-} yield stream.foreach(chunk => print(chunk.content))
+  completion <- client.streamComplete(
+    Conversation(Seq(UserMessage("Your question here")))
+  ) { chunk =>
+    chunk.content.foreach(print)
+  }
+} yield completion
 ```
 
 ---
@@ -507,7 +509,7 @@ clientResult match {
     // Run all queries in parallel
     val futures = queries.map { query =>
       Future {
-        client.complete(List(UserMessage(query)), None)
+        client.complete(Conversation(Seq(UserMessage(query))))
       }
     }
 
@@ -539,13 +541,10 @@ llm4s {
 Or override per request:
 
 ```scala
-import scala.concurrent.duration._
-
-// This is conceptual - actual API may vary
+// Note: Per-request timeouts are configured via application.conf or provider settings.
+// The complete method uses the configured timeout automatically.
 val response = client.complete(
-  messages = List(UserMessage("Quick question")),
-  model = None,
-  timeout = Some(10.seconds)
+  Conversation(Seq(UserMessage("Quick question")))
 )
 ```
 

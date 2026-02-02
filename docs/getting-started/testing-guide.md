@@ -378,7 +378,7 @@ class ErrorHandlingSpec extends AnyFlatSpec with Matchers {
 
 Test that tools are invoked correctly.
 
-> **Note**: This example uses simplified Tool API for clarity. In production, use `ToolBuilder` and `ToolFunction` from `org.llm4s.agent.tool` package. See the [Tools documentation](../agents/tools.md) for actual API.
+> **Note**: This example uses simplified Tool API for clarity. In production, use `ToolBuilder` and `ToolFunction` from the `org.llm4s.toolapi` package. See the [Tools documentation](../agents/tools.md) for actual API.
 
 ```scala
 class ToolCallingSpec extends AnyFlatSpec with Matchers {
@@ -459,8 +459,9 @@ class RAGSpec extends AnyFlatSpec with Matchers {
     )
 
     // Note: This is conceptual pseudocode showing testing patterns.
-    // Use actual VectorStore implementations from org.llm4s.llmconnect.vectorstore package
-    val vectorStore = new InMemoryVectorStore()  // Example - use actual implementation
+    // LLM4S does not currently include vector store implementations.
+    // Use your preferred vector store library (e.g., Pinecone, Milvus, ChromaDB).
+    val vectorStore = new InMemoryVectorStore()  // Pseudocode - use your vector store
     documents.foreach(doc => vectorStore.add(doc, embedder.embed(doc)))  // embedder is conceptual
 
     val results = vectorStore.search("functional programming", topK = 1)

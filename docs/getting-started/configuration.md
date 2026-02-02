@@ -794,20 +794,21 @@ llm4s {
 2. **Use streaming for long responses:**
 ```scala
 // Non-streaming: waits for full response
-client.complete(messages, None)
+client.complete(Conversation(Seq(UserMessage("Your query"))))
 
 // Streaming: get tokens as they arrive
-client.completeStreaming(messages, None).map { stream =>
-  stream.foreach(chunk => print(chunk.content))
+client.streamComplete(
+  Conversation(Seq(UserMessage("Your query")))
+) { chunk =>
+  chunk.content.foreach(print)
 }
 ```
 
 3. **Reduce response length:**
 ```scala
 client.complete(
-  messages,
-  None,
-  maxTokens = Some(500)  // Limit response length
+  Conversation(Seq(UserMessage("Your query"))),
+  CompletionOptions(maxTokens = Some(500))  // Limit response length
 )
 ```
 
