@@ -3,6 +3,8 @@ package org.llm4s.vectorstore
 import org.llm4s.types.Result
 import org.llm4s.error.ProcessingError
 
+import org.slf4j.LoggerFactory
+
 import java.sql.{ Connection, PreparedStatement, ResultSet }
 import scala.collection.mutable.ArrayBuffer
 import scala.util.{ Try, Using }
@@ -34,6 +36,8 @@ final class PgVectorStore private (
   val tableName: String,
   private val ownsDataSource: Boolean = true
 ) extends VectorStore {
+
+  private val logger = LoggerFactory.getLogger(getClass)
 
   // Initialize schema on creation
   initializeSchema()
@@ -473,8 +477,7 @@ final class PgVectorStore private (
       if (cleaned.isEmpty) Array.empty
       else
         Try(cleaned.split(",").map(_.trim.toFloat)).getOrElse {
-          // Log warning and return empty array for corrupt embeddings
-          System.err.println(s"Warning: Failed to parse embedding string: $s")
+          logger.warn(s"Failed to parse embedding string: $s")
           Array.empty
         }
     }

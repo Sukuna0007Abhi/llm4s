@@ -6,6 +6,8 @@ import org.llm4s.rag.permissions._
 import org.llm4s.types.Result
 import org.llm4s.vectorstore.{ MetadataFilter, ScoredRecord, VectorRecord }
 
+import org.slf4j.LoggerFactory
+
 import java.sql.{ Array => SqlArray, Connection, ResultSet }
 import scala.collection.mutable.ArrayBuffer
 import scala.util.{ Try, Using }
@@ -29,6 +31,8 @@ final class PgSearchIndex private (
   private val vectorTableName: String,
   private val _pgConfig: SearchIndex.PgConfig
 ) extends SearchIndex {
+
+  private val logger = LoggerFactory.getLogger(getClass)
 
   /** Expose PostgreSQL configuration for automatic RAG integration */
   override def pgConfig: Option[SearchIndex.PgConfig] = Some(_pgConfig)
@@ -355,8 +359,7 @@ final class PgSearchIndex private (
     if (cleaned.isEmpty) Array.empty
     else
       Try(cleaned.split(",").map(_.trim.toFloat)).getOrElse {
-        // Log warning and return empty array for corrupt embeddings
-        System.err.println(s"Warning: Failed to parse embedding string: $str")
+        logger.warn(s"Failed to parse embedding string: $str")
         Array.empty
       }
   }
