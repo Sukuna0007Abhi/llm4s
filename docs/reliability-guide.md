@@ -1034,6 +1034,5 @@ client.withReliability(config, metrics)            // With metrics
 
 **Additional Resources:**
 
-- [P0_P1_PRIORITY_ANALYSIS.md](../P0_P1_PRIORITY_ANALYSIS.md) - Implementation details
 - [modules/core/src/main/scala/org/llm4s/reliability/](../modules/core/src/main/scala/org/llm4s/reliability/) - Source code
 - [LLM Provider Documentation](../docs/guide/) - Provider-specific guides
