@@ -69,6 +69,39 @@ trait MetricsCollector {
     model: String,
     costUsd: Double
   ): Unit
+
+  /**
+   * Record a retry attempt for reliability tracking.
+   *
+   * @param provider Provider name
+   * @param attemptNumber Which retry attempt (1 = first retry, 2 = second, etc.)
+   */
+  def recordRetryAttempt(
+    provider: String,
+    attemptNumber: Int
+  ): Unit = () // Default no-op
+
+  /**
+   * Record circuit breaker state transition.
+   *
+   * @param provider Provider name
+   * @param newState New circuit breaker state ("open", "closed", "half-open")
+   */
+  def recordCircuitBreakerTransition(
+    provider: String,
+    newState: String
+  ): Unit = () // Default no-op
+
+  /**
+   * Record a generic error for metrics (when full request tracking not applicable).
+   *
+   * @param errorKind Type of error
+   * @param provider Provider name
+   */
+  def recordError(
+    errorKind: ErrorKind,
+    provider: String
+  ): Unit = () // Default no-op
 }
 
 object MetricsCollector {
@@ -129,9 +162,12 @@ sealed trait ErrorKind
 object ErrorKind {
   case object RateLimit      extends ErrorKind
   case object Timeout        extends ErrorKind
+  case object TimeoutError   extends ErrorKind // Alias for compatibility
   case object Authentication extends ErrorKind
   case object Network        extends ErrorKind
   case object Validation     extends ErrorKind
+  case object ServiceError   extends ErrorKind
+  case object ExecutionError extends ErrorKind
   case object Unknown        extends ErrorKind
 
   /**
