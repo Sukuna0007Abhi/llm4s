@@ -1,16 +1,6 @@
-# Reliable LLM Calling - Complete Guide
+# Reliable LLM Calling
 
-## Overview
-
-The reliability package provides production-grade fault tolerance for LLM provider calls through retry logic, circuit breakers, and deadline enforcement. This comprehensive framework ensures your application gracefully handles transient failures, rate limits, service outages, and network instability.
-
-### Key Benefits
-
-- **Automatic Failure Recovery**: Intelligent retry strategies with exponential backoff
-- **Service Protection**: Circuit breakers prevent cascading failures
-- **Predictable Timeouts**: Deadline enforcement prevents unbounded waiting
-- **Observable Operations**: Built-in metrics for monitoring and alerting
-- **Zero Boilerplate**: Drop-in replacement for existing LLM clients
+Production-grade fault tolerance for LLM provider calls through retry logic, circuit breakers, and deadline enforcement. Automatic failure recovery with intelligent retry strategies, circuit breakers to prevent cascading failures, deadline enforcement to prevent unbounded waiting, and built-in metrics for monitoring.
 
 ## Architecture
 
@@ -29,9 +19,7 @@ User Code → ReliableClient → Circuit Breaker → Retry Logic → Deadline �
 
 ## Features
 
-### ✅ Configurable Retry Policies
-
-Multiple retry strategies with intelligent error classification:
+**Configurable Retry Policies** - Multiple retry strategies with intelligent error classification:
 
 - **Exponential Backoff** (default): `1s → 2s → 4s → 8s → ...`
 - **Linear Backoff**: `2s → 4s → 6s → 8s → ...`
@@ -50,9 +38,7 @@ Multiple retry strategies with intelligent error classification:
 - `ValidationError` - Malformed requests (400)
 - `ConfigurationError` - Client misconfiguration
 
-### ✅ Circuit Breaker Pattern
-
-Implements the circuit breaker pattern with three states:
+**Circuit Breaker Pattern** - Three states for service resilience:
 
 **1. Closed (Normal Operation)**
 - All requests pass through
@@ -74,9 +60,7 @@ Implements the circuit breaker pattern with three states:
 - Reduces latency during outages (fail fast vs. timeout)
 - Automatic recovery testing
 
-### ✅ Deadline Enforcement
-
-Prevents unbounded waiting with configurable per-operation timeouts:
+**Deadline Enforcement** - Prevents unbounded waiting with configurable per-operation timeouts:
 
 - Tracks elapsed time across all retry attempts
 - Cancels retries when deadline approaches
@@ -88,9 +72,7 @@ Prevents unbounded waiting with configurable per-operation timeouts:
 - Long-running batch jobs with time limits
 - User-facing features with UX constraints
 
-### ✅ Metrics Integration
-
-Comprehensive observability through `MetricsCollector` interface:
+**Metrics Integration** - Comprehensive observability through `MetricsCollector` interface:
 
 **Tracked Metrics:**
 - Retry attempt count and delay per provider
@@ -105,9 +87,7 @@ Comprehensive observability through `MetricsCollector` interface:
 
 ## Quick Start
 
-### Option 1: Using ReliableProviders (Recommended)
-
-The easiest way to create reliable clients:
+**Using ReliableProviders (Recommended)**
 
 ```scala
 import org.llm4s.reliability.ReliableProviders
@@ -127,9 +107,7 @@ clientResult.foreach { client =>
 }
 ```
 
-### Option 2: Using ReliabilitySyntax
-
-Add `.withReliability()` to any existing client:
+**Using ReliabilitySyntax** - Add `.withReliability()` to any existing client:
 
 ```scala
 import org.llm4s.reliability.ReliabilitySyntax._
@@ -138,9 +116,7 @@ import org.llm4s.llmconnect.provider.OpenAIClient
 val client = OpenAIClient(config, metrics).map(_.withReliability())
 ```
 
-### Option 3: Manual Wrapping
-
-Full control over configuration:
+**Manual Wrapping** - Full control over configuration:
 
 ```scala
 import org.llm4s.reliability.{ ReliableClient, ReliabilityConfig }
@@ -154,18 +130,13 @@ val reliableClient = new ReliableClient(
 
 ## Configuration Examples
 
-### Default Configuration (Recommended)
-
+**Default (Recommended):**
 ```scala
 ReliabilityConfig.default
-// - 3 retry attempts with exponential backoff
-// - Circuit breaker: 5 failures → open for 30s
-// - 5 minute deadline
+// 3 retry attempts, 5 failures → open circuit, 5 min deadline
 ```
 
-### Aggressive Configuration
-
-More retries, faster recovery:
+**Aggressive** - More retries, faster recovery:
 
 ```scala
 import org.llm4s.reliability.ReliableProviders
@@ -176,23 +147,19 @@ val client = ReliableProviders.anthropic(
 )
 // - 5 retry attempts
 // - Circuit breaker: 10 failures → open for 15s
-// - 3 minute deadline
+// 5 retry attempts, 10 failures → open circuit, 3 min deadline
 ```
 
-### Conservative Configuration
-
-Fewer retries, longer timeout:
+**Conservative** - Fewer retries, longer timeout:
 
 ```scala
 ReliabilityConfig.conservative
 // - 2 retry attempts
 // - Circuit breaker: 3 failures → open for 60s
-// - 10 minute deadline
+// 2 retry attempts, 3 failures → open circuit, 10 min deadline
 ```
 
-### Custom Configuration
-
-Build your own:
+**Custom:**
 
 ```scala
 import org.llm4s.reliability._
@@ -220,9 +187,8 @@ val client = ReliableProviders.openai(
 
 ## Provider Examples
 
-### OpenAI
-
 ```scala
+// OpenAI
 import org.llm4s.reliability.ReliableProviders
 import org.llm4s.llmconnect.config.OpenAIConfig
 
@@ -233,81 +199,45 @@ val client = ReliableProviders.openai(
     baseUrl = Some("https://api.openai.com/v1")
   )
 )
-```
 
-### Azure OpenAI
-
-```scala
-import org.llm4s.llmconnect.config.AzureConfig
-
-val client = ReliableProviders.azureOpenAI(
+// Azure OpenAI
   AzureConfig(
     apiKey = "...",
     endpoint = "https://your-resource.openai.azure.com/",
     deploymentName = "gpt-4o"
   )
 )
-```
 
-### Anthropic Claude
-
-```scala
-import org.llm4s.llmconnect.config.AnthropicConfig
-
-val client = ReliableProviders.anthropic(
+// Anthropic
   AnthropicConfig(
     apiKey = "sk-ant-...",
     model = "claude-3-5-sonnet-20241022"
   )
 )
-```
 
-### Google Gemini
-
-```scala
-import org.llm4s.llmconnect.config.GeminiConfig
-
-val client = ReliableProviders.gemini(
+// Gemini
   GeminiConfig(
     apiKey = "...",
     model = "gemini-2.0-flash-exp"
   )
 )
-```
 
-### Ollama (Local)
-
-```scala
-import org.llm4s.llmconnect.config.OllamaConfig
-
-val client = ReliableProviders.ollama(
+// Ollama
   OllamaConfig(
     baseUrl = "http://localhost:11434",
     model = "llama3.1"
   )
 )
-```
 
-### OpenRouter
-
-```scala
-import org.llm4s.llmconnect.config.OpenAIConfig
-
-val client = ReliableProviders.openRouter(
+// OpenRouter
   OpenAIConfig(
     apiKey = "sk-or-...",
     model = "anthropic/claude-3.5-sonnet",
     baseUrl = Some("https://openrouter.ai/api/v1")
   )
 )
-```
 
-### Zai (Together AI)
-
-```scala
-import org.llm4s.llmconnect.config.ZaiConfig
-
-val client = ReliableProviders.zai(
+// Zai
   ZaiConfig(
     apiKey = "...",
     model = "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo"
@@ -317,40 +247,27 @@ val client = ReliableProviders.zai(
 
 ## Retry Policies
 
-### Exponential Backoff (Default)
-
 ```scala
+// Exponential backoff (default): 2^n * baseDelay
 RetryPolicy.exponentialBackoff(
   maxAttempts = 3,
   baseDelay = 1.second,
   maxDelay = 32.seconds
-)
 // Delays: 1s, 2s, 4s, 8s, 16s, 32s...
-```
 
-### Linear Backoff
-
-```scala
+// Linear backoff: n * baseDelay
 RetryPolicy.linearBackoff(
   maxAttempts = 3,
   baseDelay = 2.seconds
-)
 // Delays: 2s, 4s, 6s, 8s...
-```
 
-### Fixed Delay
-
-```scala
+// Fixed delay
 RetryPolicy.fixedDelay(
   maxAttempts = 3,
   delay = 3.seconds
-)
 // Delays: 3s, 3s, 3s...
-```
 
-### Custom Policy
-
-```scala
+// Custom policy
 RetryPolicy.custom(
   attempts = 5,
   delayFn = (attempt, error) => {
@@ -370,13 +287,9 @@ RetryPolicy.custom(
 
 ## Circuit Breaker
 
-### How It Works
+Three states: **Closed** (normal), **Open** (failing fast), **Half-Open** (testing recovery).
 
-1. **Closed** (Normal): All requests go through
-2. **Open** (Failing): Fast-fail all requests, service appears down
-3. **Half-Open** (Testing): Allow some requests to test recovery
-
-### Configuration
+Configuration:
 
 ```scala
 CircuitBreakerConfig(
@@ -1034,5 +947,5 @@ client.withReliability(config, metrics)            // With metrics
 
 **Additional Resources:**
 
-- [modules/core/src/main/scala/org/llm4s/reliability/](../modules/core/src/main/scala/org/llm4s/reliability/) - Source code
-- [LLM Provider Documentation](../docs/guide/) - Provider-specific guides
+- [Source code](../modules/core/src/main/scala/org/llm4s/reliability/)
+- [LLM Provider Documentation](../docs/guide/)
