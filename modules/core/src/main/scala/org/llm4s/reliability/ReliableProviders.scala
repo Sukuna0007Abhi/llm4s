@@ -44,9 +44,7 @@ object ReliableProviders {
     reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
     metrics: MetricsCollector = MetricsCollector.noop
   ): Result[LLMClient] =
-    OpenAIClient(config, metrics).map(client =>
-      new ReliableClient(client, "openai", reliabilityConfig, Some(metrics))
-    )
+    OpenAIClient(config, metrics).map(client => new ReliableClient(client, "openai", reliabilityConfig, Some(metrics)))
 
   /**
    * Create a reliable Azure OpenAI client.
@@ -95,9 +93,7 @@ object ReliableProviders {
     reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
     metrics: MetricsCollector = MetricsCollector.noop
   ): Result[LLMClient] =
-    GeminiClient(config, metrics).map(client =>
-      new ReliableClient(client, "gemini", reliabilityConfig, Some(metrics))
-    )
+    GeminiClient(config, metrics).map(client => new ReliableClient(client, "gemini", reliabilityConfig, Some(metrics)))
 
   /**
    * Create a reliable Ollama client.
@@ -112,9 +108,7 @@ object ReliableProviders {
     reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
     metrics: MetricsCollector = MetricsCollector.noop
   ): Result[LLMClient] =
-    OllamaClient(config, metrics).map(client =>
-      new ReliableClient(client, "ollama", reliabilityConfig, Some(metrics))
-    )
+    OllamaClient(config, metrics).map(client => new ReliableClient(client, "ollama", reliabilityConfig, Some(metrics)))
 
   /**
    * Create a reliable OpenRouter client.
@@ -148,9 +142,7 @@ object ReliableProviders {
     reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
     metrics: MetricsCollector = MetricsCollector.noop
   ): Result[LLMClient] =
-    ZaiClient(config, metrics).map(client =>
-      new ReliableClient(client, "zai", reliabilityConfig, Some(metrics))
-    )
+    ZaiClient(config, metrics).map(client => new ReliableClient(client, "zai", reliabilityConfig, Some(metrics)))
 
   /**
    * Wrap any existing LLMClient with reliability features.

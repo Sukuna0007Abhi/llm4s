@@ -25,16 +25,15 @@ class RetryPolicyTest extends AnyFunSuite with Matchers {
     policy.delayFor(1, error) shouldBe 1.second
     policy.delayFor(2, error) shouldBe 2.seconds
     policy.delayFor(3, error) shouldBe 4.seconds
-    policy.delayFor(4, error) shouldBe 5.seconds  // Capped
-    policy.delayFor(5, error) shouldBe 5.seconds  // Capped
+    policy.delayFor(4, error) shouldBe 5.seconds // Capped
+    policy.delayFor(5, error) shouldBe 5.seconds // Capped
   }
 
   test("exponentialBackoff respects server-provided Retry-After header") {
-    val policy      = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.second)
+    val policy = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.second)
     val rateLimitError = RateLimitError(
-      message = "Rate limited",
-      retryDelay = Some(5000L),  // 5 seconds in millis
-      provider = "test"
+      provider = "test",
+      retryAfter = 5000L // 5 seconds in millis
     )
 
     // Should use server delay instead of exponential
@@ -67,9 +66,9 @@ class RetryPolicyTest extends AnyFunSuite with Matchers {
     val policy = RetryPolicy.noRetry
 
     policy.maxAttempts shouldBe 1
-    policy.isRetryable(RateLimitError("test", None, "test")) shouldBe false
+    policy.isRetryable(RateLimitError("test", 60L)) shouldBe false
     policy.isRetryable(TimeoutError("test", 1.second, "test")) shouldBe false
-    policy.isRetryable(NetworkError("test", None)) shouldBe false
+    policy.isRetryable(NetworkError("test", None, "test")) shouldBe false
   }
 
   test("custom policy allows user-defined logic") {
@@ -94,7 +93,7 @@ class RetryPolicyTest extends AnyFunSuite with Matchers {
 
   test("isRetryable returns true for RateLimitError") {
     val policy = RetryPolicy.exponentialBackoff()
-    val error  = RateLimitError("Rate limited", None, "test")
+    val error  = RateLimitError("test", 60L)
 
     policy.isRetryable(error) shouldBe true
   }
@@ -108,7 +107,7 @@ class RetryPolicyTest extends AnyFunSuite with Matchers {
 
   test("isRetryable returns true for NetworkError") {
     val policy = RetryPolicy.exponentialBackoff()
-    val error  = NetworkError("Connection failed", None)
+    val error  = NetworkError("Connection failed", None, "test")
 
     policy.isRetryable(error) shouldBe true
   }
@@ -153,7 +152,7 @@ class RetryPolicyTest extends AnyFunSuite with Matchers {
 
   test("isRetryable returns false for ValidationError") {
     val policy = RetryPolicy.exponentialBackoff()
-    val error  = ValidationError("Invalid input")
+    val error  = ValidationError("input", "Invalid input")
 
     policy.isRetryable(error) shouldBe false
   }

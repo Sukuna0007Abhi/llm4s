@@ -35,10 +35,10 @@ final class ReliableClient(
 ) extends LLMClient {
 
   // Circuit breaker state (thread-safe via atomic references)
-  private val circuitState     = new AtomicReference[CircuitState](CircuitState.Closed)
-  private val failureCount     = new AtomicInteger(0)
-  private val successCount     = new AtomicInteger(0)
-  private val lastFailureTime  = new AtomicLong(0L)
+  private val circuitState    = new AtomicReference[CircuitState](CircuitState.Closed)
+  private val failureCount    = new AtomicInteger(0)
+  private val successCount    = new AtomicInteger(0)
+  private val lastFailureTime = new AtomicLong(0L)
 
   // LLMClient interface methods
   override def complete(
@@ -84,7 +84,7 @@ final class ReliableClient(
       case Some(deadline) =>
         executeWithDeadlineAndRetry(operation, deadline)
       case None =>
-        executeWithRetry(operation, attemptNumber = 1, lastError = None)
+        executeWithRetry(operation, attemptNumber = 1)
     }
 
     // Update circuit breaker state based on result
@@ -109,15 +109,16 @@ final class ReliableClient(
     @tailrec
     def loop(attemptNumber: Int, lastError: Option[LLMError]): Result[A] = {
       val remainingTime = deadlineMs - System.currentTimeMillis()
-      
+
       // Check if deadline already exceeded
       if (remainingTime <= 0) {
         collector.foreach(_.recordError(ErrorKind.Timeout, providerName))
         return Left(
           TimeoutError(
             message = lastError match {
-              case Some(err) => s"Operation exceeded deadline of ${deadline.toSeconds}s after $attemptNumber attempts. Last error: ${err.message}"
-              case None      => s"Operation exceeded deadline of ${deadline.toSeconds}s before first attempt"
+              case Some(err) =>
+                s"Operation exceeded deadline of ${deadline.toSeconds}s after $attemptNumber attempts. Last error: ${err.message}"
+              case None => s"Operation exceeded deadline of ${deadline.toSeconds}s before first attempt"
             },
             timeoutDuration = deadline,
             operation = "reliable-client.complete"
@@ -126,18 +127,19 @@ final class ReliableClient(
       }
 
       // Execute operation with interruption handling
-      val result = try {
-        operation()
-      } catch {
-        case _: InterruptedException =>
-          Left(
-            TimeoutError(
-              message = s"Operation interrupted after $attemptNumber attempts",
-              timeoutDuration = deadline,
-              operation = "reliable-client.complete"
+      val result =
+        try
+          operation()
+        catch {
+          case _: InterruptedException =>
+            Left(
+              TimeoutError(
+                message = s"Operation interrupted after $attemptNumber attempts",
+                timeoutDuration = deadline,
+                operation = "reliable-client.complete"
+              )
             )
-          )
-      }
+        }
 
       result match {
         case success @ Right(_) =>
@@ -148,24 +150,25 @@ final class ReliableClient(
           collector.foreach(_.recordRetryAttempt(providerName, attemptNumber))
 
           // Calculate delay and check if we have time
-          val delay                = config.retryPolicy.delayFor(attemptNumber, error)
-          val remainingAfterDelay  = remainingTime - delay.toMillis
-          
+          val delay               = config.retryPolicy.delayFor(attemptNumber, error)
+          val remainingAfterDelay = remainingTime - delay.toMillis
+
           if (remainingAfterDelay <= 0) {
             // Not enough time for retry
             collector.foreach(_.recordError(ErrorKind.Timeout, providerName))
             Left(
               TimeoutError(
-                message = s"Operation exceeded deadline of ${deadline.toSeconds}s after $attemptNumber attempts. Last error: ${error.message}",
+                message =
+                  s"Operation exceeded deadline of ${deadline.toSeconds}s after $attemptNumber attempts. Last error: ${error.message}",
                 timeoutDuration = deadline,
                 operation = "reliable-client.complete"
               )
             )
           } else {
             // Sleep and retry
-            try {
+            try
               Thread.sleep(delay.toMillis)
-            } catch {
+            catch {
               case _: InterruptedException =>
                 return Left(
                   TimeoutError(
@@ -195,18 +198,22 @@ final class ReliableClient(
    * Execute operation with retry logic (no deadline).
    */
   @tailrec
-  private def executeWithRetry[A](operation: () => Result[A], attemptNumber: Int, lastError: Option[LLMError]): Result[A] = {
-    val result = try {
-      operation()
-    } catch {
-      case _: InterruptedException =>
-        Left(
-          ExecutionError(
-            message = s"Operation interrupted after $attemptNumber attempts",
-            operation = "reliable-client.complete"
+  private def executeWithRetry[A](
+    operation: () => Result[A],
+    attemptNumber: Int
+  ): Result[A] = {
+    val result =
+      try
+        operation()
+      catch {
+        case _: InterruptedException =>
+          Left(
+            ExecutionError(
+              message = s"Operation interrupted after $attemptNumber attempts",
+              operation = "reliable-client.complete"
+            )
           )
-        )
-    }
+      }
 
     result match {
       case success @ Right(_) =>
@@ -218,9 +225,9 @@ final class ReliableClient(
 
         // Calculate delay
         val delay = config.retryPolicy.delayFor(attemptNumber, error)
-        try {
+        try
           Thread.sleep(delay.toMillis)
-        } catch {
+        catch {
           case _: InterruptedException =>
             return Left(
               ExecutionError(
@@ -231,7 +238,7 @@ final class ReliableClient(
         }
 
         // Retry
-        executeWithRetry(operation, attemptNumber + 1, Some(error))
+        executeWithRetry(operation, attemptNumber + 1)
 
       case Left(error) =>
         // Max attempts reached or non-retryable error - preserve original error

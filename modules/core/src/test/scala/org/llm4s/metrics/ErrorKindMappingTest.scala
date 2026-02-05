@@ -9,7 +9,7 @@ import scala.concurrent.duration._
 class ErrorKindMappingTest extends AnyFunSuite with Matchers {
 
   test("fromLLMError maps RateLimitError to RateLimit") {
-    val error = RateLimitError("Rate limited", Some(1000), "test")
+    val error = RateLimitError("test", 1000)
     ErrorKind.fromLLMError(error) shouldBe ErrorKind.RateLimit
   }
 
@@ -24,17 +24,17 @@ class ErrorKindMappingTest extends AnyFunSuite with Matchers {
   }
 
   test("fromLLMError maps NetworkError to Network") {
-    val error = NetworkError("Connection failed", None)
+    val error = NetworkError("Connection failed", None, "test-endpoint")
     ErrorKind.fromLLMError(error) shouldBe ErrorKind.Network
   }
 
   test("fromLLMError maps ValidationError to Validation") {
-    val error = ValidationError("Invalid input")
+    val error = ValidationError("input", "Invalid input")
     ErrorKind.fromLLMError(error) shouldBe ErrorKind.Validation
   }
 
   test("fromLLMError maps InvalidInputError to Validation") {
-    val error = InvalidInputError("Invalid input", None)
+    val error = InvalidInputError("input", "invalid-value", "Invalid input")
     ErrorKind.fromLLMError(error) shouldBe ErrorKind.Validation
   }
 
@@ -74,7 +74,7 @@ class ErrorKindMappingTest extends AnyFunSuite with Matchers {
     val allKinds = Set(
       ErrorKind.RateLimit,
       ErrorKind.Timeout,
-      ErrorKind.TimeoutError,  // Alias
+      ErrorKind.TimeoutError, // Alias
       ErrorKind.Authentication,
       ErrorKind.Network,
       ErrorKind.Validation,
