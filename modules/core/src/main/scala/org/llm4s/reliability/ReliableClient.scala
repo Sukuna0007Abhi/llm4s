@@ -8,6 +8,7 @@ import org.llm4s.metrics.{ MetricsCollector, ErrorKind }
 
 import scala.annotation.tailrec
 import scala.concurrent.duration.Duration
+import java.util.concurrent.atomic.{ AtomicInteger, AtomicLong, AtomicReference }
 
 /**
  * Wrapper that adds reliability features to any LLMClient.
@@ -18,21 +19,26 @@ import scala.concurrent.duration.Duration
  * - Deadline enforcement to prevent hanging operations
  * - Metrics tracking for retry attempts and circuit breaker state
  *
+ * Thread-safety: Uses AtomicInteger/AtomicReference for circuit breaker state management
+ * to ensure correct behavior under concurrent access.
+ *
  * @param underlying The client to wrap
+ * @param providerName Explicit provider name for stable metrics labels
  * @param config Reliability configuration
  * @param collector Optional metrics collector for observability
  */
 final class ReliableClient(
   underlying: LLMClient,
+  providerName: String,
   config: ReliabilityConfig,
   collector: Option[MetricsCollector] = None
 ) extends LLMClient {
 
-  // Circuit breaker state (mutable but thread-safe via volatile)
-  @volatile private var circuitState: CircuitState = CircuitState.Closed
-  @volatile private var failureCount: Int          = 0
-  @volatile private var successCount: Int          = 0
-  @volatile private var lastFailureTime: Long      = 0L
+  // Circuit breaker state (thread-safe via atomic references)
+  private val circuitState     = new AtomicReference[CircuitState](CircuitState.Closed)
+  private val failureCount     = new AtomicInteger(0)
+  private val successCount     = new AtomicInteger(0)
+  private val lastFailureTime  = new AtomicLong(0L)
 
   // LLMClient interface methods
   override def complete(
@@ -61,9 +67,6 @@ final class ReliableClient(
   override def validate(): Result[Unit]    = underlying.validate()
   override def close(): Unit               = underlying.close()
 
-  // Helper to get provider name for metrics
-  private def provider: String = underlying.getClass.getSimpleName.replace("Client", "").toLowerCase
-
   /**
    * Execute operation with retry, circuit breaker, and deadline.
    */
@@ -71,7 +74,7 @@ final class ReliableClient(
     // Check circuit breaker state
     checkCircuitBreaker() match {
       case Left(error) =>
-        collector.foreach(_.recordError(ErrorKind.ServiceError, provider))
+        collector.foreach(_.recordError(ErrorKind.ServiceError, providerName))
         return Left(error)
       case Right(_) => // Continue
     }
@@ -79,9 +82,9 @@ final class ReliableClient(
     // Apply deadline if configured
     val result = config.deadline match {
       case Some(deadline) =>
-        executeWithDeadline(operation, deadline)
+        executeWithDeadlineAndRetry(operation, deadline)
       case None =>
-        executeWithRetry(operation, attemptNumber = 1)
+        executeWithRetry(operation, attemptNumber = 1, lastError = None)
     }
 
     // Update circuit breaker state based on result
@@ -96,106 +99,165 @@ final class ReliableClient(
   }
 
   /**
-   * Execute operation with deadline enforcement.
+   * Execute operation with deadline enforcement and retry logic combined.
+   * Single retry loop that checks deadline before each attempt.
    */
-  private def executeWithDeadline[A](operation: () => Result[A], deadline: Duration): Result[A] = {
-    val startTime           = System.currentTimeMillis()
-    val deadlineMs          = startTime + deadline.toMillis
-    var attempt             = 1
-    var lastError: LLMError = null
+  private def executeWithDeadlineAndRetry[A](operation: () => Result[A], deadline: Duration): Result[A] = {
+    val startTime  = System.currentTimeMillis()
+    val deadlineMs = startTime + deadline.toMillis
 
-    while (System.currentTimeMillis() < deadlineMs && attempt <= config.retryPolicy.maxAttempts)
-      executeWithRetry(operation, attempt) match {
+    @tailrec
+    def loop(attemptNumber: Int, lastError: Option[LLMError]): Result[A] = {
+      val remainingTime = deadlineMs - System.currentTimeMillis()
+      
+      // Check if deadline already exceeded
+      if (remainingTime <= 0) {
+        collector.foreach(_.recordError(ErrorKind.Timeout, providerName))
+        return Left(
+          TimeoutError(
+            message = lastError match {
+              case Some(err) => s"Operation exceeded deadline of ${deadline.toSeconds}s after $attemptNumber attempts. Last error: ${err.message}"
+              case None      => s"Operation exceeded deadline of ${deadline.toSeconds}s before first attempt"
+            },
+            timeoutDuration = deadline,
+            operation = "reliable-client.complete"
+          )
+        )
+      }
+
+      // Execute operation with interruption handling
+      val result = try {
+        operation()
+      } catch {
+        case _: InterruptedException =>
+          Left(
+            TimeoutError(
+              message = s"Operation interrupted after $attemptNumber attempts",
+              timeoutDuration = deadline,
+              operation = "reliable-client.complete"
+            )
+          )
+      }
+
+      result match {
         case success @ Right(_) =>
-          return success
+          success
 
-        case Left(error) =>
-          lastError = error
-          val remainingTime = deadlineMs - System.currentTimeMillis()
+        case Left(error) if attemptNumber < config.retryPolicy.maxAttempts && config.retryPolicy.isRetryable(error) =>
+          // Record retry attempt
+          collector.foreach(_.recordRetryAttempt(providerName, attemptNumber))
 
-          if (remainingTime <= 0) {
-            collector.foreach(_.recordError(ErrorKind.Timeout, provider))
-            return Left(
+          // Calculate delay and check if we have time
+          val delay                = config.retryPolicy.delayFor(attemptNumber, error)
+          val remainingAfterDelay  = remainingTime - delay.toMillis
+          
+          if (remainingAfterDelay <= 0) {
+            // Not enough time for retry
+            collector.foreach(_.recordError(ErrorKind.Timeout, providerName))
+            Left(
               TimeoutError(
-                message = s"Operation exceeded deadline of ${deadline.toSeconds}s after $attempt attempts",
+                message = s"Operation exceeded deadline of ${deadline.toSeconds}s after $attemptNumber attempts. Last error: ${error.message}",
                 timeoutDuration = deadline,
                 operation = "reliable-client.complete"
               )
             )
-          }
-
-          if (attempt < config.retryPolicy.maxAttempts && config.retryPolicy.isRetryable(error)) {
-            val delay       = config.retryPolicy.delayFor(attempt, error)
-            val actualDelay = delay.min(Duration.fromNanos(remainingTime * 1000000))
-            Thread.sleep(actualDelay.toMillis)
-            attempt += 1
           } else {
-            return Left(error)
+            // Sleep and retry
+            try {
+              Thread.sleep(delay.toMillis)
+            } catch {
+              case _: InterruptedException =>
+                return Left(
+                  TimeoutError(
+                    message = s"Operation interrupted during retry delay after $attemptNumber attempts",
+                    timeoutDuration = deadline,
+                    operation = "reliable-client.complete"
+                  )
+                )
+            }
+            loop(attemptNumber + 1, Some(error))
           }
-      }
 
-    // Deadline exceeded
-    collector.foreach(_.recordError(ErrorKind.Timeout, provider))
-    Left(
-      TimeoutError(
-        message =
-          s"Operation exceeded deadline of ${deadline.toSeconds}s after $attempt attempts. Last error: ${lastError.message}",
-        timeoutDuration = deadline,
-        operation = "reliable-client.complete"
-      )
-    )
+        case Left(error) =>
+          // Max attempts reached or non-retryable error
+          if (attemptNumber > 1) {
+            // Preserve original error type, add context via collector
+            collector.foreach(_.recordError(ErrorKind.fromLLMError(error), providerName))
+          }
+          Left(error)
+      }
+    }
+
+    loop(1, None)
   }
 
   /**
-   * Execute operation with retry logic.
+   * Execute operation with retry logic (no deadline).
    */
   @tailrec
-  private def executeWithRetry[A](operation: () => Result[A], attemptNumber: Int): Result[A] =
-    operation() match {
+  private def executeWithRetry[A](operation: () => Result[A], attemptNumber: Int, lastError: Option[LLMError]): Result[A] = {
+    val result = try {
+      operation()
+    } catch {
+      case _: InterruptedException =>
+        Left(
+          ExecutionError(
+            message = s"Operation interrupted after $attemptNumber attempts",
+            operation = "reliable-client.complete"
+          )
+        )
+    }
+
+    result match {
       case success @ Right(_) =>
         success
 
       case Left(error) if attemptNumber < config.retryPolicy.maxAttempts && config.retryPolicy.isRetryable(error) =>
         // Record retry attempt
-        collector.foreach(_.recordRetryAttempt(provider, attemptNumber))
+        collector.foreach(_.recordRetryAttempt(providerName, attemptNumber))
 
         // Calculate delay
         val delay = config.retryPolicy.delayFor(attemptNumber, error)
-        Thread.sleep(delay.toMillis)
+        try {
+          Thread.sleep(delay.toMillis)
+        } catch {
+          case _: InterruptedException =>
+            return Left(
+              ExecutionError(
+                message = s"Operation interrupted during retry delay after $attemptNumber attempts",
+                operation = "reliable-client.complete"
+              )
+            )
+        }
 
         // Retry
-        executeWithRetry(operation, attemptNumber + 1)
+        executeWithRetry(operation, attemptNumber + 1, Some(error))
 
-      case failure @ Left(error) =>
-        // Max attempts reached or non-retryable error
+      case Left(error) =>
+        // Max attempts reached or non-retryable error - preserve original error
         if (attemptNumber > 1) {
-          collector.foreach(_.recordError(ErrorKind.Unknown, provider))
-          Left(
-            ExecutionError(
-              message = s"Operation failed after $attemptNumber attempts. Last error: ${error.message}",
-              operation = "reliable-client.complete"
-            )
-          )
-        } else {
-          failure
+          collector.foreach(_.recordError(ErrorKind.fromLLMError(error), providerName))
         }
+        Left(error)
     }
+  }
 
   /**
    * Check circuit breaker state and transition if needed.
    */
   private def checkCircuitBreaker(): Result[Unit] =
-    circuitState match {
+    circuitState.get() match {
       case CircuitState.Closed =>
         Right(())
 
       case CircuitState.Open =>
         val now = System.currentTimeMillis()
-        if ((now - lastFailureTime) > config.circuitBreaker.recoveryTimeout.toMillis) {
+        if ((now - lastFailureTime.get()) > config.circuitBreaker.recoveryTimeout.toMillis) {
           // Transition to half-open
-          circuitState = CircuitState.HalfOpen
-          successCount = 0
-          collector.foreach(_.recordCircuitBreakerTransition(provider, "half-open"))
+          if (circuitState.compareAndSet(CircuitState.Open, CircuitState.HalfOpen)) {
+            successCount.set(0)
+            collector.foreach(_.recordCircuitBreakerTransition(providerName, "half-open"))
+          }
           Right(())
         } else {
           // Stay open
@@ -217,20 +279,21 @@ final class ReliableClient(
    * Handle successful operation.
    */
   private def onSuccess(): Unit =
-    circuitState match {
+    circuitState.get() match {
       case CircuitState.Closed =>
         // Reset failure count
-        failureCount = 0
+        failureCount.set(0)
 
       case CircuitState.HalfOpen =>
         // Track successes in half-open state
-        successCount += 1
-        if (successCount >= config.circuitBreaker.successThreshold) {
+        val newSuccessCount = successCount.incrementAndGet()
+        if (newSuccessCount >= config.circuitBreaker.successThreshold) {
           // Close circuit
-          circuitState = CircuitState.Closed
-          failureCount = 0
-          successCount = 0
-          collector.foreach(_.recordCircuitBreakerTransition(provider, "closed"))
+          if (circuitState.compareAndSet(CircuitState.HalfOpen, CircuitState.Closed)) {
+            failureCount.set(0)
+            successCount.set(0)
+            collector.foreach(_.recordCircuitBreakerTransition(providerName, "closed"))
+          }
         }
 
       case CircuitState.Open =>
@@ -241,23 +304,25 @@ final class ReliableClient(
    * Handle failed operation.
    */
   private def onFailure(): Unit = {
-    lastFailureTime = System.currentTimeMillis()
+    lastFailureTime.set(System.currentTimeMillis())
 
-    circuitState match {
+    circuitState.get() match {
       case CircuitState.Closed =>
         // Track failures
-        failureCount += 1
-        if (failureCount >= config.circuitBreaker.failureThreshold) {
+        val newFailureCount = failureCount.incrementAndGet()
+        if (newFailureCount >= config.circuitBreaker.failureThreshold) {
           // Open circuit
-          circuitState = CircuitState.Open
-          collector.foreach(_.recordCircuitBreakerTransition(provider, "open"))
+          if (circuitState.compareAndSet(CircuitState.Closed, CircuitState.Open)) {
+            collector.foreach(_.recordCircuitBreakerTransition(providerName, "open"))
+          }
         }
 
       case CircuitState.HalfOpen =>
         // Single failure in half-open → back to open
-        circuitState = CircuitState.Open
-        successCount = 0
-        collector.foreach(_.recordCircuitBreakerTransition(provider, "open"))
+        if (circuitState.compareAndSet(CircuitState.HalfOpen, CircuitState.Open)) {
+          successCount.set(0)
+          collector.foreach(_.recordCircuitBreakerTransition(providerName, "open"))
+        }
 
       case CircuitState.Open =>
       // Already open
@@ -267,16 +332,16 @@ final class ReliableClient(
   /**
    * Get current circuit breaker state (for testing/monitoring).
    */
-  def currentCircuitState: CircuitState = circuitState
+  def currentCircuitState: CircuitState = circuitState.get()
 
   /**
    * Reset circuit breaker state (for testing).
    */
   def resetCircuitBreaker(): Unit = {
-    circuitState = CircuitState.Closed
-    failureCount = 0
-    successCount = 0
-    lastFailureTime = 0L
+    circuitState.set(CircuitState.Closed)
+    failureCount.set(0)
+    successCount.set(0)
+    lastFailureTime.set(0L)
   }
 }
 
@@ -284,21 +349,41 @@ object ReliableClient {
 
   /**
    * Wrap a client with default reliability configuration.
+   * Provider name derived from client class name (use withProviderName for custom).
    */
-  def apply(client: LLMClient): ReliableClient =
-    new ReliableClient(client, ReliabilityConfig.default, None)
+  def apply(client: LLMClient): ReliableClient = {
+    val providerName = client.getClass.getSimpleName.replace("Client", "").toLowerCase
+    new ReliableClient(client, providerName, ReliabilityConfig.default, None)
+  }
 
   /**
    * Wrap a client with custom reliability configuration.
+   * Provider name derived from client class name (use withProviderName for custom).
    */
-  def apply(client: LLMClient, config: ReliabilityConfig): ReliableClient =
-    new ReliableClient(client, config, None)
+  def apply(client: LLMClient, config: ReliabilityConfig): ReliableClient = {
+    val providerName = client.getClass.getSimpleName.replace("Client", "").toLowerCase
+    new ReliableClient(client, providerName, config, None)
+  }
 
   /**
    * Wrap a client with reliability + metrics.
+   * Provider name derived from client class name (use withProviderName for custom).
    */
-  def apply(client: LLMClient, config: ReliabilityConfig, collector: MetricsCollector): ReliableClient =
-    new ReliableClient(client, config, Some(collector))
+  def apply(client: LLMClient, config: ReliabilityConfig, collector: MetricsCollector): ReliableClient = {
+    val providerName = client.getClass.getSimpleName.replace("Client", "").toLowerCase
+    new ReliableClient(client, providerName, config, Some(collector))
+  }
+
+  /**
+   * Wrap a client with explicit provider name (recommended for production).
+   */
+  def withProviderName(
+    client: LLMClient,
+    providerName: String,
+    config: ReliabilityConfig = ReliabilityConfig.default,
+    collector: Option[MetricsCollector] = None
+  ): ReliableClient =
+    new ReliableClient(client, providerName, config, collector)
 }
 
 /**

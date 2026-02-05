@@ -44,7 +44,9 @@ object ReliableProviders {
     reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
     metrics: MetricsCollector = MetricsCollector.noop
   ): Result[LLMClient] =
-    OpenAIClient(config, metrics).map(client => new ReliableClient(client, reliabilityConfig, Some(metrics)))
+    OpenAIClient(config, metrics).map(client =>
+      new ReliableClient(client, "openai", reliabilityConfig, Some(metrics))
+    )
 
   /**
    * Create a reliable Azure OpenAI client.
@@ -59,7 +61,9 @@ object ReliableProviders {
     reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
     metrics: MetricsCollector = MetricsCollector.noop
   ): Result[LLMClient] =
-    OpenAIClient(config, metrics).map(client => new ReliableClient(client, reliabilityConfig, Some(metrics)))
+    OpenAIClient(config, metrics).map(client =>
+      new ReliableClient(client, "azure-openai", reliabilityConfig, Some(metrics))
+    )
 
   /**
    * Create a reliable Anthropic client.
@@ -74,7 +78,9 @@ object ReliableProviders {
     reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
     metrics: MetricsCollector = MetricsCollector.noop
   ): Result[LLMClient] =
-    AnthropicClient(config, metrics).map(client => new ReliableClient(client, reliabilityConfig, Some(metrics)))
+    AnthropicClient(config, metrics).map(client =>
+      new ReliableClient(client, "anthropic", reliabilityConfig, Some(metrics))
+    )
 
   /**
    * Create a reliable Gemini client.
@@ -89,7 +95,9 @@ object ReliableProviders {
     reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
     metrics: MetricsCollector = MetricsCollector.noop
   ): Result[LLMClient] =
-    GeminiClient(config, metrics).map(client => new ReliableClient(client, reliabilityConfig, Some(metrics)))
+    GeminiClient(config, metrics).map(client =>
+      new ReliableClient(client, "gemini", reliabilityConfig, Some(metrics))
+    )
 
   /**
    * Create a reliable Ollama client.
@@ -104,7 +112,9 @@ object ReliableProviders {
     reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
     metrics: MetricsCollector = MetricsCollector.noop
   ): Result[LLMClient] =
-    OllamaClient(config, metrics).map(client => new ReliableClient(client, reliabilityConfig, Some(metrics)))
+    OllamaClient(config, metrics).map(client =>
+      new ReliableClient(client, "ollama", reliabilityConfig, Some(metrics))
+    )
 
   /**
    * Create a reliable OpenRouter client.
@@ -121,7 +131,9 @@ object ReliableProviders {
     reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
     metrics: MetricsCollector = MetricsCollector.noop
   ): Result[LLMClient] =
-    OpenRouterClient(config, metrics).map(client => new ReliableClient(client, reliabilityConfig, Some(metrics)))
+    OpenRouterClient(config, metrics).map(client =>
+      new ReliableClient(client, "openrouter", reliabilityConfig, Some(metrics))
+    )
 
   /**
    * Create a reliable Zai client.
@@ -136,7 +148,9 @@ object ReliableProviders {
     reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
     metrics: MetricsCollector = MetricsCollector.noop
   ): Result[LLMClient] =
-    ZaiClient(config, metrics).map(client => new ReliableClient(client, reliabilityConfig, Some(metrics)))
+    ZaiClient(config, metrics).map(client =>
+      new ReliableClient(client, "zai", reliabilityConfig, Some(metrics))
+    )
 
   /**
    * Wrap any existing LLMClient with reliability features.
@@ -144,16 +158,18 @@ object ReliableProviders {
    * Use this when you already have a configured LLMClient instance.
    *
    * @param client The client to wrap
+   * @param providerName Explicit provider name for metrics (e.g., "openai", "anthropic")
    * @param reliabilityConfig Reliability configuration (default: ReliabilityConfig.default)
    * @param metrics Optional metrics collector
    * @return ReliableClient wrapping the provided client
    */
   def wrap(
     client: LLMClient,
+    providerName: String,
     reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
     metrics: Option[MetricsCollector] = None
   ): LLMClient =
-    new ReliableClient(client, reliabilityConfig, metrics)
+    new ReliableClient(client, providerName, reliabilityConfig, metrics)
 }
 
 /**
@@ -165,7 +181,7 @@ object ReliableProviders {
  * {{{
  * import org.llm4s.reliability.ReliabilitySyntax._
  *
- * val client = OpenAIClient(config, metrics).map(_.withReliability())
+ * val client = OpenAIClient(config, metrics).map(_.withReliability("openai"))
  * }}}
  */
 object ReliabilitySyntax {
@@ -174,20 +190,29 @@ object ReliabilitySyntax {
 
     /**
      * Wrap this client with default reliability features.
+     * Provider name derived from class name (not recommended for production).
      */
-    def withReliability(): LLMClient =
-      new ReliableClient(client, ReliabilityConfig.default, None)
+    def withReliability(): LLMClient = {
+      val providerName = client.getClass.getSimpleName.replace("Client", "").toLowerCase
+      new ReliableClient(client, providerName, ReliabilityConfig.default, None)
+    }
+
+    /**
+     * Wrap this client with reliability, providing explicit provider name (recommended).
+     */
+    def withReliability(providerName: String): LLMClient =
+      new ReliableClient(client, providerName, ReliabilityConfig.default, None)
 
     /**
      * Wrap this client with custom reliability configuration.
      */
-    def withReliability(config: ReliabilityConfig): LLMClient =
-      new ReliableClient(client, config, None)
+    def withReliability(providerName: String, config: ReliabilityConfig): LLMClient =
+      new ReliableClient(client, providerName, config, None)
 
     /**
      * Wrap this client with custom reliability configuration and metrics.
      */
-    def withReliability(config: ReliabilityConfig, metrics: MetricsCollector): LLMClient =
-      new ReliableClient(client, config, Some(metrics))
+    def withReliability(providerName: String, config: ReliabilityConfig, metrics: MetricsCollector): LLMClient =
+      new ReliableClient(client, providerName, config, Some(metrics))
   }
 }

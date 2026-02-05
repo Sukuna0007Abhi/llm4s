@@ -24,11 +24,25 @@ sealed trait RetryPolicy {
 
   /**
    * Check if an error is retryable.
+   * 
+   * Retryable errors:
+   * - RateLimitError (429)
+   * - TimeoutError
+   * - ServiceError with 5xx, 429, or 408 status codes
+   * - NetworkError
+   * 
+   * Non-retryable errors:
+   * - ServiceError with 4xx status (except 408/429) - client errors
+   * - AuthenticationError
+   * - ValidationError
+   * - Other errors
    */
   def isRetryable(error: LLMError): Boolean = error match {
     case _: RateLimitError => true
     case _: TimeoutError   => true
-    case _: ServiceError   => true
+    case se: ServiceError =>
+      // Only retry 5xx (server errors), 429 (rate limit), 408 (timeout)
+      se.httpStatus >= 500 || se.httpStatus == 429 || se.httpStatus == 408
     case _: NetworkError   => true
     case _                 => false
   }

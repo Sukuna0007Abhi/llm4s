@@ -658,7 +658,7 @@ class ReliabilityIntegrationTest extends AnyFlatSpec {
 - Failed request: `100ms` + error handling
 
 **With Reliability (Success):**
-- Single request: `100ms` + `<1ms` (overhead negligible)
+- Single request: `100ms` + minimal overhead
 - Failed request: `100ms` + retries + backoff delays
 
 **Example Retry Timeline:**
@@ -674,16 +674,17 @@ Total: 3300ms (3.3s)
 ### Memory Footprint
 
 **Per ReliableClient:**
-- Circuit breaker state: ~24 bytes (volatile integers + timestamps)
-- Configuration: ~48 bytes (immutable case classes)
-- Total overhead: **<100 bytes per client**
+- Circuit breaker state: atomic integers and references for thread-safe state management
+- Configuration: immutable case classes
+- Memory overhead is minimal and designed to be efficient
 
-Safe to wrap hundreds of clients without memory concerns.
+Safe to wrap many clients without memory concerns.
 
 ### Thread Safety
 
 All reliability features are **thread-safe**:
-- Circuit breaker state uses `@volatile` fields
+- Circuit breaker state uses `AtomicInteger` and `AtomicReference` for safe concurrent access
+- All state transitions are atomic using compare-and-set operations
 - Metrics collection is caller-controlled
 - Safe to share `ReliableClient` instances across threads
 
