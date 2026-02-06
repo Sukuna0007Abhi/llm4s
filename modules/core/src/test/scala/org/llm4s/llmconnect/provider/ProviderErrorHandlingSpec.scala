@@ -16,7 +16,7 @@ class ProviderErrorHandlingSpec extends AnyFlatSpec with Matchers {
     val mockMetrics = new MockMetricsCollector()
 
     // Test with OpenAI client
-    val openAIConfig = OpenAIConfig.fromValues("gpt-4", "test-key", None, "https://api.openai.com/v1")
+    val openAIConfig = OpenAIConfig.fromValues("gpt-4", "test-key", None, "https://example.invalid/v1")
     val openAIClient = new OpenAIClient(openAIConfig, mockMetrics)
 
     openAIClient should not be null
@@ -26,7 +26,7 @@ class ProviderErrorHandlingSpec extends AnyFlatSpec with Matchers {
     val anthropicConfig = AnthropicConfig(
       apiKey = "test-key",
       model = "claude-3-5-sonnet-latest",
-      baseUrl = "https://api.anthropic.com",
+      baseUrl = "https://example.invalid",
       contextWindow = 200000,
       reserveCompletion = 4096
     )
@@ -39,7 +39,7 @@ class ProviderErrorHandlingSpec extends AnyFlatSpec with Matchers {
     val mockMetrics = new MockMetricsCollector()
 
     // OpenAI
-    val openAIConfig = OpenAIConfig.fromValues("gpt-4", "test-key", None, "https://api.openai.com/v1")
+    val openAIConfig = OpenAIConfig.fromValues("gpt-4", "test-key", None, "https://example.invalid/v1")
     val openAIClient = new OpenAIClient(openAIConfig, mockMetrics)
     openAIClient should not be null
 
@@ -47,7 +47,7 @@ class ProviderErrorHandlingSpec extends AnyFlatSpec with Matchers {
     val anthropicConfig = AnthropicConfig(
       apiKey = "test-key",
       model = "claude-3-5-sonnet-latest",
-      baseUrl = "https://api.anthropic.com",
+      baseUrl = "https://example.invalid",
       contextWindow = 200000,
       reserveCompletion = 4096
     )
@@ -91,7 +91,7 @@ class ProviderErrorHandlingSpec extends AnyFlatSpec with Matchers {
     val zaiConfig = ZaiConfig(
       apiKey = "test-key",
       model = "GLM-4.7",
-      baseUrl = "https://api.z.ai/api/paas/v4",
+      baseUrl = "https://example.invalid/api/paas/v4",
       contextWindow = 128000,
       reserveCompletion = 4096
     )
@@ -142,53 +142,35 @@ class ProviderErrorHandlingSpec extends AnyFlatSpec with Matchers {
   }
 
   "Provider configurations" should "validate required fields" in {
-    // OpenAI config requires API key and model
-    val openAIConfig = OpenAIConfig.fromValues("gpt-4", "test-key", None, "https://api.openai.com/v1")
-    openAIConfig.apiKey should not be empty
-    openAIConfig.model should not be empty
+    // Test OpenAI config validation - empty API key should fail
+    intercept[IllegalArgumentException] {
+      OpenAIConfig.fromValues("gpt-4", "", None, "https://example.invalid/v1")
+    }
 
-    // Anthropic config requires API key and model
-    val anthropicConfig = AnthropicConfig(
-      apiKey = "test-key",
-      model = "claude-3-5-sonnet-latest",
-      baseUrl = "https://api.anthropic.com",
-      contextWindow = 200000,
-      reserveCompletion = 4096
-    )
-    anthropicConfig.apiKey should not be empty
-    anthropicConfig.model should not be empty
+    // Test Anthropic config validation - empty API key should fail
+    intercept[IllegalArgumentException] {
+      AnthropicConfig.fromValues("claude-3-5-sonnet-latest", "", "https://example.invalid")
+    }
 
-    // Gemini config requires API key and model
-    val geminiConfig = GeminiConfig(
-      apiKey = "test-key",
-      model = "gemini-2.0-flash-exp",
-      baseUrl = "https://generativelanguage.googleapis.com",
-      contextWindow = 1048576,
-      reserveCompletion = 8192
-    )
-    geminiConfig.apiKey should not be empty
-    geminiConfig.model should not be empty
+    // Test Gemini config validation - empty API key should fail
+    intercept[IllegalArgumentException] {
+      GeminiConfig.fromValues("gemini-2.0-flash-exp", "", "https://example.invalid")
+    }
 
-    // Ollama config requires model and base URL
-    val ollamaConfig = OllamaConfig(
-      model = "llama3.1",
-      baseUrl = "http://localhost:11434",
-      contextWindow = 4096,
-      reserveCompletion = 512
-    )
-    ollamaConfig.model should not be empty
-    ollamaConfig.baseUrl should not be empty
+    // Test Azure config validation - empty endpoint should fail
+    intercept[IllegalArgumentException] {
+      AzureConfig.fromValues("gpt-4", "", "test-key", "2024-02-01")
+    }
 
-    // Zai config requires API key and model
-    val zaiConfig = ZaiConfig(
-      apiKey = "test-key",
-      model = "GLM-4.7",
-      baseUrl = "https://api.z.ai/api/paas/v4",
-      contextWindow = 128000,
-      reserveCompletion = 4096
-    )
-    zaiConfig.apiKey should not be empty
-    zaiConfig.model should not be empty
+    // Test Ollama config validation - empty baseUrl should fail
+    intercept[IllegalArgumentException] {
+      OllamaConfig.fromValues("llama3.1", "")
+    }
+
+    // Test Zai config validation - empty API key should fail
+    intercept[IllegalArgumentException] {
+      ZaiConfig.fromValues("GLM-4.7", "", "https://example.invalid/api/paas/v4")
+    }
   }
 
   "Error messages" should "contain useful debugging information" in {
@@ -206,18 +188,18 @@ class ProviderErrorHandlingSpec extends AnyFlatSpec with Matchers {
 
   "Provider clients" should "use noop metrics when no collector provided" in {
     // All providers should accept default noop metrics
-    val openAIConfig = OpenAIConfig.fromValues("gpt-4", "test-key", None, "https://api.openai.com/v1")
+    val openAIConfig = OpenAIConfig.fromValues("gpt-4", "test-key", None, "https://example.invalid/v1")
     val anthropicConfig = AnthropicConfig(
       apiKey = "test-key",
       model = "claude-3-5-sonnet-latest",
-      baseUrl = "https://api.anthropic.com",
+      baseUrl = "https://example.invalid",
       contextWindow = 200000,
       reserveCompletion = 4096
     )
     val geminiConfig = GeminiConfig(
       apiKey = "test-key",
       model = "gemini-2.0-flash-exp",
-      baseUrl = "https://generativelanguage.googleapis.com",
+      baseUrl = "https://example.invalid",
       contextWindow = 1048576,
       reserveCompletion = 8192
     )
@@ -230,7 +212,7 @@ class ProviderErrorHandlingSpec extends AnyFlatSpec with Matchers {
     val zaiConfig = ZaiConfig(
       apiKey = "test-key",
       model = "GLM-4.7",
-      baseUrl = "https://api.z.ai/api/paas/v4",
+      baseUrl = "https://example.invalid/api/paas/v4",
       contextWindow = 128000,
       reserveCompletion = 4096
     )

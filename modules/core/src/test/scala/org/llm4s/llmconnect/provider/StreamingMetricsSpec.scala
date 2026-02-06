@@ -16,18 +16,18 @@ class StreamingMetricsSpec extends AnyFlatSpec with Matchers {
     val mockMetrics = new MockMetricsCollector()
 
     // Test configurations for various providers
-    val openAIConfig = OpenAIConfig.fromValues("gpt-4", "test-key", None, "https://api.openai.com/v1")
+    val openAIConfig = OpenAIConfig.fromValues("gpt-4", "test-key", None, "https://example.invalid/v1")
     val anthropicConfig = AnthropicConfig(
       apiKey = "test-key",
       model = "claude-3-5-sonnet-latest",
-      baseUrl = "https://api.anthropic.com",
+      baseUrl = "https://example.invalid",
       contextWindow = 200000,
       reserveCompletion = 4096
     )
     val geminiConfig = GeminiConfig(
       apiKey = "test-key",
       model = "gemini-2.0-flash-exp",
-      baseUrl = "https://generativelanguage.googleapis.com",
+      baseUrl = "https://example.invalid",
       contextWindow = 1048576,
       reserveCompletion = 8192
     )
@@ -47,7 +47,7 @@ class StreamingMetricsSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "accept callback functions for chunk processing" in {
-    val openAIConfig = OpenAIConfig.fromValues("gpt-4", "test-key", None, "https://api.openai.com/v1")
+    val openAIConfig = OpenAIConfig.fromValues("gpt-4", "test-key", None, "https://example.invalid/v1")
     val client       = new OpenAIClient(openAIConfig, org.llm4s.metrics.MetricsCollector.noop)
 
     // This test verifies the method signature exists and accepts the callback
@@ -59,7 +59,7 @@ class StreamingMetricsSpec extends AnyFlatSpec with Matchers {
     // Test that clients are properly configured to handle streaming
     val mockMetrics = new MockMetricsCollector()
 
-    val openAIConfig = OpenAIConfig.fromValues("gpt-4", "test-key", None, "https://api.openai.com/v1")
+    val openAIConfig = OpenAIConfig.fromValues("gpt-4", "test-key", None, "https://example.invalid/v1")
     val openAIClient = new OpenAIClient(openAIConfig, mockMetrics)
 
     // Verify client has streaming capability
@@ -75,7 +75,7 @@ class StreamingMetricsSpec extends AnyFlatSpec with Matchers {
     val mockMetrics = new MockMetricsCollector()
 
     // Create clients with metrics tracking
-    val openAIConfig = OpenAIConfig.fromValues("gpt-4", "test-key", None, "https://api.openai.com/v1")
+    val openAIConfig = OpenAIConfig.fromValues("gpt-4", "test-key", None, "https://example.invalid/v1")
     val client       = new OpenAIClient(openAIConfig, mockMetrics)
 
     client should not be null
@@ -187,18 +187,18 @@ class StreamingMetricsSpec extends AnyFlatSpec with Matchers {
     val mockMetrics = new MockMetricsCollector()
 
     // Verify all streaming-capable providers accept metrics
-    val openAIConfig = OpenAIConfig.fromValues("gpt-4", "test-key", None, "https://api.openai.com/v1")
+    val openAIConfig = OpenAIConfig.fromValues("gpt-4", "test-key", None, "https://example.invalid/v1")
     val anthropicConfig = AnthropicConfig(
       apiKey = "test-key",
       model = "claude-3-5-sonnet-latest",
-      baseUrl = "https://api.anthropic.com",
+      baseUrl = "https://example.invalid",
       contextWindow = 200000,
       reserveCompletion = 4096
     )
     val geminiConfig = GeminiConfig(
       apiKey = "test-key",
       model = "gemini-2.0-flash-exp",
-      baseUrl = "https://generativelanguage.googleapis.com",
+      baseUrl = "https://example.invalid",
       contextWindow = 1048576,
       reserveCompletion = 8192
     )
