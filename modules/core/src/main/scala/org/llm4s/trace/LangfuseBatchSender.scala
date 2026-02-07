@@ -82,7 +82,7 @@ class DefaultLangfuseBatchSender extends LangfuseBatchSender {
         }
       } else {
         logger.error(s"[Langfuse] Batch export failed: ${response.statusCode}")
-        logger.error(s"[Langfuse] Response body: ${response.text()}")
+        logger.error(s"[Langfuse] Response body: ${org.llm4s.util.Redaction.truncateForLog(response.text())}")
         logger.error(s"[Langfuse] Request URL: ${config.langfuseUrl}")
         logger.error(s"[Langfuse] Request payload size: ${batchPayload.render().length} bytes")
       }

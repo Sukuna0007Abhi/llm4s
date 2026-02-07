@@ -63,7 +63,7 @@ class ZaiClient(
             Right(parseCompletion(responseJson))
           case 401    => Left(AuthenticationError("zai", "Invalid API key"))
           case 429    => Left(RateLimitError("zai"))
-          case status => Left(ServiceError(status, "zai", s"Z.ai API error: ${response.body()}"))
+          case status => Left(ServiceError(status, "zai", s"Z.ai API error: ${org.llm4s.util.Redaction.truncateForLog(response.body())}"))
         }
       }
     }
@@ -106,7 +106,7 @@ class ZaiClient(
           response.statusCode() match {
             case 401    => Left(AuthenticationError("zai", "Invalid API key"))
             case 429    => Left(RateLimitError("zai"))
-            case status => Left(ServiceError(status, "zai", s"Z.ai API error: $errorBody"))
+            case status => Left(ServiceError(status, "zai", s"Z.ai API error: ${org.llm4s.util.Redaction.truncateForLog(errorBody)}"))
           }
         } else {
           val streamResult = Try {
