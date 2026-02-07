@@ -148,7 +148,9 @@ class StreamableHTTPTransportImpl(url: String, override val name: String, timeou
       // Handle other HTTP errors
       if (response.statusCode >= 400) {
         val errorBody = Try(response.text()).getOrElse("Unknown error")
-        throw new RuntimeException(s"HTTP error ${response.statusCode}: ${org.llm4s.util.Redaction.truncateForLog(errorBody)}")
+        throw new RuntimeException(
+          s"HTTP error ${response.statusCode}: ${org.llm4s.util.Redaction.truncateForLog(errorBody)}"
+        )
       }
 
       // Determine response type based on content-type header
@@ -316,7 +318,9 @@ class StreamableHTTPTransportImpl(url: String, override val name: String, timeou
       // Handle HTTP errors (notifications still use HTTP)
       if (response.statusCode >= 400) {
         val errorBody = Try(response.text()).getOrElse("Unknown error")
-        throw new RuntimeException(s"HTTP error ${response.statusCode}: ${org.llm4s.util.Redaction.truncateForLog(errorBody)}")
+        throw new RuntimeException(
+          s"HTTP error ${response.statusCode}: ${org.llm4s.util.Redaction.truncateForLog(errorBody)}"
+        )
       }
 
       // For notifications, we don't parse the response body since no response is expected
@@ -439,7 +443,9 @@ class SSETransportImpl(url: String, override val name: String, timeout: Duration
       // Handle other HTTP errors
       if (response.statusCode >= 400) {
         val errorBody = Try(response.text()).getOrElse("Unknown error")
-        throw new RuntimeException(s"HTTP error ${response.statusCode}: ${org.llm4s.util.Redaction.truncateForLog(errorBody)}")
+        throw new RuntimeException(
+          s"HTTP error ${response.statusCode}: ${org.llm4s.util.Redaction.truncateForLog(errorBody)}"
+        )
       }
 
       // Determine response type based on content-type header
@@ -545,7 +551,9 @@ class SSETransportImpl(url: String, override val name: String, timeout: Duration
       // Handle HTTP errors
       if (response.statusCode >= 400) {
         val errorBody = Try(response.text()).getOrElse("Unknown error")
-        throw new RuntimeException(s"HTTP error ${response.statusCode}: ${org.llm4s.util.Redaction.truncateForLog(errorBody)}")
+        throw new RuntimeException(
+          s"HTTP error ${response.statusCode}: ${org.llm4s.util.Redaction.truncateForLog(errorBody)}"
+        )
       }
 
       // For notifications, we don't parse the response body since no response is expected
