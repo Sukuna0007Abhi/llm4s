@@ -18,6 +18,12 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
 
   private val localProcessor = new LocalImageProcessor()
 
+  private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
+
+  private def truncateForLog(body: String, maxLength: Int = 2048): String =
+    if (body.length <= maxLength) body
+    else body.take(maxLength) + s"... (truncated, original length: ${body.length})"
+
   /**
    * Analyzes an image using Anthropic's Claude Vision API.
    *
@@ -224,9 +230,14 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
                   }
                 }
                 .map(d => s"Status $statusCode: $d")
-                .getOrElse(s"Status $statusCode: $errorBody")
+                .getOrElse(s"Status $statusCode: ${truncateForLog(errorBody)}")
             case Right(body) => s"Status $statusCode: $body"
           }
+
+          // Log a truncated version to avoid leaking very large or sensitive payloads
+          logger.error(
+            s"[AnthropicVisionClient] HTTP error $statusCode: ${truncateForLog(response.body.fold(identity, identity))}"
+          )
           throw new RuntimeException(s"Anthropic API call failed - $errorMessage")
       }
     }
