@@ -19,10 +19,6 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
 
   private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
 
-  private def truncateForLog(body: String, maxLength: Int = 2048): String =
-    if (body.length <= maxLength) body
-    else body.take(maxLength) + s"... (truncated, original length: ${body.length})"
-
   /**
    * Analyzes an image using OpenAI's GPT-4 Vision API.
    *
@@ -209,17 +205,19 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
                     case (Some(msg), _, Some(code)) => s"$code: $msg"
                     case (Some(msg), Some(typ), _)  => s"$typ: $msg"
                     case (Some(msg), _, _)          => msg
-                    case _                          => errorBody
+                    case _                          => VisionClientUtils.truncateForLog(errorBody)
                   }
                 }
                 .map(d => s"Status $statusCode: $d")
-                .getOrElse(s"Status $statusCode: ${truncateForLog(errorBody)}")
-            case Right(body) => s"Status $statusCode: $body"
+                .getOrElse(s"Status $statusCode: ${VisionClientUtils.truncateForLog(errorBody)}")
+            case Right(body) => s"Status $statusCode: ${VisionClientUtils.truncateForLog(body)}"
           }
 
           // Log a truncated version to avoid leaking very large or sensitive payloads
           logger.error(
-            s"[OpenAIVisionClient] HTTP error $statusCode: ${truncateForLog(response.body.fold(identity, identity))}"
+            "[OpenAIVisionClient] HTTP error {}: {}",
+            statusCode.asInstanceOf[AnyRef],
+            VisionClientUtils.truncateForLog(response.body.fold(identity, identity))
           )
           throw new RuntimeException(s"OpenAI API call failed - $errorMessage")
       }
