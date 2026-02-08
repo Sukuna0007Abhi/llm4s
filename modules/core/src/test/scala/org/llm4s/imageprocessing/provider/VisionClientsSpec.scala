@@ -6,7 +6,7 @@ import com.sun.net.httpserver.{ HttpExchange, HttpHandler, HttpServer }
 import java.net.InetSocketAddress
 import java.util.concurrent.Executors
 import java.nio.charset.StandardCharsets
-import java.nio.file.{ Files, Paths }
+import java.nio.file.Files
 import java.awt.image.BufferedImage
 import java.awt.Color
 import javax.imageio.ImageIO

@@ -205,19 +205,19 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
                     case (Some(msg), _, Some(code)) => s"$code: $msg"
                     case (Some(msg), Some(typ), _)  => s"$typ: $msg"
                     case (Some(msg), _, _)          => msg
-                    case _                          => VisionClientUtils.truncateForLog(errorBody)
+                    case _                          => org.llm4s.util.Redaction.truncateForLog(errorBody)
                   }
                 }
                 .map(d => s"Status $statusCode: $d")
-                .getOrElse(s"Status $statusCode: ${VisionClientUtils.truncateForLog(errorBody)}")
-            case Right(body) => s"Status $statusCode: ${VisionClientUtils.truncateForLog(body)}"
+                .getOrElse(s"Status $statusCode: ${org.llm4s.util.Redaction.truncateForLog(errorBody)}")
+            case Right(body) => s"Status $statusCode: ${org.llm4s.util.Redaction.truncateForLog(body)}"
           }
 
           // Log a truncated version to avoid leaking very large or sensitive payloads
           logger.error(
             "[OpenAIVisionClient] HTTP error {}: {}",
             statusCode.asInstanceOf[AnyRef],
-            VisionClientUtils.truncateForLog(response.body.fold(identity, identity))
+            org.llm4s.util.Redaction.truncateForLog(response.body.fold(identity, identity))
           )
           throw new RuntimeException(s"OpenAI API call failed - $errorMessage")
       }
