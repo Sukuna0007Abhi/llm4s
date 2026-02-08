@@ -50,7 +50,7 @@ class ZaiClient(
           val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
 
           logger.debug(s"Response status: ${response.statusCode()}")
-          logger.debug(s"Response body: ${response.body()}")
+          logger.debug(s"Response body: ${org.llm4s.util.Redaction.truncateForLog(response.body())}")
 
           response
         }.toEither.left
