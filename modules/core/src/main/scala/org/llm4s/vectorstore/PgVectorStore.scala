@@ -22,6 +22,14 @@ import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
  * - Connection pooling via HikariCP
  * - ACID transactions
  * - Scalable to millions of vectors
+ * - Graceful handling of corrupt embeddings
+ *
+ * Corrupt Embedding Handling:
+ * - Records with unparseable embeddings are skipped during search/query/list operations
+ * - get() returns None for records with corrupt embeddings
+ * - Corrupt records are logged with id and embedding_dim for debugging
+ * - Operations continue successfully with remaining valid records
+ * - No silent data corruption - failures are observable via logs
  *
  * Requirements:
  * - PostgreSQL 16+ with pgvector extension (18+ recommended)

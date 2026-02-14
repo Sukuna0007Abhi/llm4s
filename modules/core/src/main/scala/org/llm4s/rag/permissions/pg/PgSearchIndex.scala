@@ -22,6 +22,13 @@ import scala.util.{ Try, Using }
  * 1. Extends the vectors table with collection_id and readable_by columns
  * 2. Uses GIN indexes for efficient array containment queries
  * 3. Applies two-level permission filtering (collection + document)
+ * 4. Gracefully handles corrupt embeddings without failing queries
+ *
+ * Corrupt Embedding Handling:
+ * - Records with unparseable embeddings are skipped during query operations
+ * - Corrupt records are logged with id and embedding_dim for debugging
+ * - Queries continue successfully and return topK valid results
+ * - No silent data corruption - failures are observable via logs
  *
  * @param dataSource HikariCP data source for connection pooling
  * @param vectorTableName Name of the vectors table
