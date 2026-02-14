@@ -372,22 +372,13 @@ final class PgSearchIndex private (
 
   /**
    * Parse embedding string to float array.
-   * Returns None if parsing fails. Logs detailed error information.
+   * Returns None if parsing fails (logged by caller with context).
    */
   private def parseEmbedding(str: String): Option[Array[Float]] = {
     if (str == null || str.isEmpty) return None
     val cleaned = str.stripPrefix("[").stripSuffix("]")
     if (cleaned.isEmpty) None
-    else {
-      Try(cleaned.split(",").map(_.trim.toFloat)) match {
-        case scala.util.Success(arr) => Some(arr)
-        case scala.util.Failure(ex) =>
-          // Log with truncated string to avoid log spam
-          val truncated = if (str.length > 100) s"${str.take(100)}... (${str.length} chars)" else str
-          logger.debug(s"Failed to parse embedding: $truncated - ${ex.getMessage}")
-          None
-      }
-    }
+    else Try(cleaned.split(",").map(_.trim.toFloat)).toOption
   }
 
   private def createIntArray(conn: Connection, values: Seq[Int]): SqlArray =
