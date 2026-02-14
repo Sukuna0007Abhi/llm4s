@@ -480,12 +480,25 @@ final class PgVectorStore private (
   private def embeddingToString(embedding: Array[Float]): String =
     embedding.mkString("[", ",", "]")
 
+  /**
+   * Parse embedding string to float array.
+   * Returns None if parsing fails. Logs detailed error information.
+   */
   private def stringToEmbedding(s: String): Option[Array[Float]] =
     if (s == null || s.isEmpty) None
     else {
       val cleaned = s.stripPrefix("[").stripSuffix("]")
       if (cleaned.isEmpty) None
-      else Try(cleaned.split(",").map(_.trim.toFloat)).toOption
+      else {
+        Try(cleaned.split(",").map(_.trim.toFloat)) match {
+          case scala.util.Success(arr) => Some(arr)
+          case scala.util.Failure(ex) =>
+            // Log with truncated string to avoid log spam
+            val truncated = if (s.length > 100) s"${s.take(100)}... (${s.length} chars)" else s
+            logger.debug(s"Failed to parse embedding: $truncated - ${ex.getMessage}")
+            None
+        }
+      }
     }
 
   private def metadataToJson(metadata: Map[String, String]): String =
