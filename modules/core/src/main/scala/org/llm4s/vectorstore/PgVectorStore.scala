@@ -206,11 +206,12 @@ final class PgVectorStore private (
           Using.resource(stmt.executeQuery()) { rs =>
             val results = ArrayBuffer.empty[ScoredRecord]
             while (rs.next()) {
-              val record = rowToRecord(rs)
-              val score  = rs.getDouble("similarity")
-              // Clamp score to [0, 1] range
-              val normalizedScore = math.max(0.0, math.min(1.0, score))
-              results += ScoredRecord(record, normalizedScore)
+              rowToRecord(rs).foreach { record =>
+                val score  = rs.getDouble("similarity")
+                // Clamp score to [0, 1] range
+                val normalizedScore = math.max(0.0, math.min(1.0, score))
+                results += ScoredRecord(record, normalizedScore)
+              }
             }
             results.toSeq
           }
@@ -224,7 +225,7 @@ final class PgVectorStore private (
         Using.resource(conn.prepareStatement(s"SELECT * FROM $tableName WHERE id = ?")) { stmt =>
           stmt.setString(1, id)
           Using.resource(stmt.executeQuery()) { rs =>
-            if (rs.next()) Some(rowToRecord(rs))
+            if (rs.next()) rowToRecord(rs)
             else None
           }
         }
@@ -246,7 +247,7 @@ final class PgVectorStore private (
             Using.resource(stmt.executeQuery()) { rs =>
               val records = ArrayBuffer.empty[VectorRecord]
               while (rs.next())
-                records += rowToRecord(rs)
+                rowToRecord(rs).foreach(records += _)
               records.toSeq
             }
           }
@@ -339,7 +340,7 @@ final class PgVectorStore private (
           Using.resource(stmt.executeQuery()) { rs =>
             val records = ArrayBuffer.empty[VectorRecord]
             while (rs.next())
-              records += rowToRecord(rs)
+              rowToRecord(rs).foreach(records += _)
             records.toSeq
           }
         }
@@ -411,19 +412,28 @@ final class PgVectorStore private (
     }
   }
 
-  private def rowToRecord(rs: ResultSet): VectorRecord = {
+  private def rowToRecord(rs: ResultSet): Option[VectorRecord] = {
+    val id           = rs.getString("id")
     val embeddingStr = rs.getString("embedding")
-    val embedding    = stringToEmbedding(embeddingStr)
-    val content      = Option(rs.getString("content")).filter(_.nonEmpty)
-    val metadataJson = rs.getString("metadata")
-    val metadata     = jsonToMetadata(metadataJson)
+    val embeddingDim = rs.getInt("embedding_dim")
+    
+    stringToEmbedding(embeddingStr) match {
+      case Some(embedding) =>
+        val content      = Option(rs.getString("content")).filter(_.nonEmpty)
+        val metadataJson = rs.getString("metadata")
+        val metadata     = jsonToMetadata(metadataJson)
 
-    VectorRecord(
-      id = rs.getString("id"),
-      embedding = embedding,
-      content = content,
-      metadata = metadata
-    )
+        Some(VectorRecord(
+          id = id,
+          embedding = embedding,
+          content = content,
+          metadata = metadata
+        ))
+      
+      case None =>
+        logger.warn(s"Skipping corrupt vector record: id=$id, embedding_dim=$embeddingDim, reason=failed to parse embedding")
+        None
+    }
   }
 
   private def filterToSql(filter: MetadataFilter): (String, Seq[Any]) = filter match {
@@ -470,16 +480,12 @@ final class PgVectorStore private (
   private def embeddingToString(embedding: Array[Float]): String =
     embedding.mkString("[", ",", "]")
 
-  private def stringToEmbedding(s: String): Array[Float] =
-    if (s == null || s.isEmpty) Array.empty
+  private def stringToEmbedding(s: String): Option[Array[Float]] =
+    if (s == null || s.isEmpty) None
     else {
       val cleaned = s.stripPrefix("[").stripSuffix("]")
-      if (cleaned.isEmpty) Array.empty
-      else
-        Try(cleaned.split(",").map(_.trim.toFloat)).getOrElse {
-          logger.warn(s"Failed to parse embedding string: $s")
-          Array.empty
-        }
+      if (cleaned.isEmpty) None
+      else Try(cleaned.split(",").map(_.trim.toFloat)).toOption
     }
 
   private def metadataToJson(metadata: Map[String, String]): String =

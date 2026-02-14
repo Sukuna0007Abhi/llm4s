@@ -143,9 +143,10 @@ final class PgSearchIndex private (
         Using.resource(stmt.executeQuery()) { rs =>
           val buffer = ArrayBuffer[ScoredRecord]()
           while (rs.next()) {
-            val record = rowToRecord(rs)
-            val score  = math.max(0.0, math.min(1.0, rs.getDouble("similarity")))
-            buffer += ScoredRecord(record, score)
+            rowToRecord(rs).foreach { record =>
+              val score  = math.max(0.0, math.min(1.0, rs.getDouble("similarity")))
+              buffer += ScoredRecord(record, score)
+            }
           }
           buffer.toSeq
         }
@@ -337,31 +338,36 @@ final class PgSearchIndex private (
       else (s"NOT ($innerSql)", innerParams)
   }
 
-  private def rowToRecord(rs: ResultSet): VectorRecord = {
+  private def rowToRecord(rs: ResultSet): Option[VectorRecord] = {
+    val id           = rs.getString("id")
     val embeddingStr = rs.getString("embedding")
-    val embedding    = parseEmbedding(embeddingStr)
-    val metadata     = jsonToMap(rs.getString("metadata"))
+    val embeddingDim = rs.getInt("embedding_dim")
+    
+    parseEmbedding(embeddingStr) match {
+      case Some(embedding) =>
+        val metadata = jsonToMap(rs.getString("metadata"))
 
-    VectorRecord(
-      id = rs.getString("id"),
-      embedding = embedding,
-      content = Option(rs.getString("content")),
-      metadata = metadata
-    )
+        Some(VectorRecord(
+          id = id,
+          embedding = embedding,
+          content = Option(rs.getString("content")),
+          metadata = metadata
+        ))
+      
+      case None =>
+        logger.warn(s"Skipping corrupt vector record: id=$id, embedding_dim=$embeddingDim, reason=failed to parse embedding")
+        None
+    }
   }
 
   private def embeddingToString(embedding: Array[Float]): String =
     "[" + embedding.map(f => f.toString).mkString(",") + "]"
 
-  private def parseEmbedding(str: String): Array[Float] = {
-    if (str == null || str.isEmpty) return Array.empty
+  private def parseEmbedding(str: String): Option[Array[Float]] = {
+    if (str == null || str.isEmpty) return None
     val cleaned = str.stripPrefix("[").stripSuffix("]")
-    if (cleaned.isEmpty) Array.empty
-    else
-      Try(cleaned.split(",").map(_.trim.toFloat)).getOrElse {
-        logger.warn(s"Failed to parse embedding string: $str")
-        Array.empty
-      }
+    if (cleaned.isEmpty) None
+    else Try(cleaned.split(",").map(_.trim.toFloat)).toOption
   }
 
   private def createIntArray(conn: Connection, values: Seq[Int]): SqlArray =
