@@ -41,6 +41,12 @@ final class PgSearchIndex private (
 
   private val logger = LoggerFactory.getLogger(getClass)
 
+  // Rate limiting for corrupt embedding logs (prevent log spam)
+  @volatile private var lastCorruptLogTime: Long = 0L
+  @volatile private var corruptRecordsSinceLastLog: Int = 0
+  private val LOG_THROTTLE_SECONDS = 60
+  private val LOG_THROTTLE_COUNT = 100
+
   /** Expose PostgreSQL configuration for automatic RAG integration */
   override def pgConfig: Option[SearchIndex.PgConfig] = Some(_pgConfig)
 
@@ -362,7 +368,21 @@ final class PgSearchIndex private (
         ))
       
       case None =>
-        logger.warn(s"Skipping corrupt vector record: id=$id, embedding_dim=$embeddingDim, reason=failed to parse embedding")
+        // Rate-limited logging to prevent log spam
+        val now = System.currentTimeMillis() / 1000
+        corruptRecordsSinceLastLog += 1
+        
+        val shouldLog = (now - lastCorruptLogTime >= LOG_THROTTLE_SECONDS) ||
+                       (corruptRecordsSinceLastLog >= LOG_THROTTLE_COUNT)
+        
+        if (shouldLog) {
+          val skippedMsg = if (corruptRecordsSinceLastLog > 1) {
+            s" ($corruptRecordsSinceLastLog corrupt records since last log)"
+          } else ""
+          logger.warn(s"Skipping corrupt vector record: id=$id, embedding_dim=$embeddingDim$skippedMsg")
+          lastCorruptLogTime = now
+          corruptRecordsSinceLastLog = 0
+        }
         None
     }
   }
